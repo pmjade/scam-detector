@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Scam Report Generator</title>
+  <link rel="stylesheet" href="styles.css"> <!-- ✅ Fixed this line -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background-image: url('https://images.unsplash.com/photo-1623051608897-87e0c2d40e62?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
+      background-size: cover;
+      background-position: center;
+      font-family: 'Georgia', serif;
+    }
+    .glass {
+      background-color: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(10px);
+    }
+    input, textarea {
+      background-color: rgba(255, 255, 255, 0.1);
+      border: 1px solid #ffd700;
+      color: white;
+    }
+    input::placeholder {
+      color: #ccc;
+    }
+    .report-box {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid #8884;
+      border-radius: 12px;
+      padding: 20px;
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace;
+      max-height: 300px;
+      overflow-y: auto;
+      box-shadow: 0 0 15px #00000055;
+    }
+  </style>
+</head>
+
+<body class="text-white">
+  <section class="min-h-screen flex flex-col justify-center items-center px-4">
+    <div class="glass p-10 rounded-xl shadow-2xl max-w-2xl w-full text-center">
+      <h1 class="text-4xl md:text-5xl font-bold text-yellow-300 mb-4">💼 Scam Report PRO</h1>
+      <p class="text-md md:text-lg mb-6 text-gray-300">Paste a website. If it's sus, we'll tell you 😈</p>
+
+      <input type="text" id="urlInput" placeholder="https://example.com" class="w-full p-3 rounded mb-4">
+      <button id="checkBtn" class="bg-yellow-400 text-black font-semibold py-2 px-6 rounded hover:bg-yellow-300 transition-all">
+        Check Website
+      </button>
+
+      <div id="warning" class="text-red-500 font-bold mt-6 hidden">
+        We checked the website!
+      </div>
+
+      <div id="result" class="mt-6 text-left hidden">
+        <!-- Report gets injected here -->
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const devMode = false; // change to true to test full result without payment
+
+    const checkBtn = document.getElementById("checkBtn");
+    const resultDiv = document.getElementById("result");
+
+    checkBtn.addEventListener("click", async () => {
+      const url = document.getElementById("urlInput").value.trim();
+      if (!url) return alert("😭 Enter a website bro!");
+
+      resultDiv.innerHTML = "";
+      resultDiv.classList.add("hidden");
+
+      checkBtn.textContent = "Checking...";
+      checkBtn.disabled = true;
+
+      try {
+        const res = await fetch("/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ domain: url })
+        });
+        const data = await res.json();
+        checkBtn.textContent = "Check Website";
+        checkBtn.disabled = false;
+
+        if (data.status === "ready") {
+          document.getElementById("warning").classList.remove("hidden");
+
+          if (devMode) {
+            const fullRes = await fetch("/unlock", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ domain: url, key: "DEV_MODE_FAKE_KEY" })
+            });
+            const json = await fullRes.json();
+            resultDiv.classList.remove("hidden");
+            resultDiv.innerHTML = `
+              <h2 class="text-xl font-bold text-green-400 mb-2">✅ Full Report</h2>
+              <div class="report-box">${json.report}</div>
+            `;
+          } else {
+            resultDiv.classList.remove("hidden");
+            resultDiv.innerHTML = `
+              <p class="text-lg">🔒 Your report is ready but locked.</p>
+              <p class="mb-4">To unlock, pay below and paste your license key.</p>
+              <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
+                <button class="bg-yellow-500 text-black px-6 py-2 rounded font-semibold hover:bg-yellow-400 mb-4">
+                  Unlock Scam Report – €2
+                </button>
+              </a>
+              <input type="text" id="licenseKey" placeholder="Paste your license key" class="w-full p-2 mb-2 rounded">
+              <button onclick="unlock('${url}')" class="bg-green-400 hover:bg-green-300 text-black px-4 py-2 rounded">
+                Unlock Now
+              </button>
+            `;
+          }
+        } else {
+          alert("💀 Something went wrong.");
+        }
+
+      } catch (err) {
+        console.error(err);
+        alert("😭 Server error. Try again.");
+        checkBtn.textContent = "Check Website";
+        checkBtn.disabled = false;
+      }
+    });
+
+    async function unlock(domain) {
+      const key = document.getElementById("licenseKey").value.trim();
+      if (!key) return alert("😭 Enter your license key.");
+
+      const res = await fetch("/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain, key })
+      });
+      const data = await res.json();
+      if (data.report) {
+        resultDiv.innerHTML = `
+          <h2 class="text-xl font-bold text-green-400 mb-2">✅ Scam Report</h2>
+          <div class="report-box">${data.report}</div>
+        `;
+      } else {
+        alert("❌ Invalid key or something broke.");
+      }
+    }
+  </script>
+</body>
+</html>
+
+
+
