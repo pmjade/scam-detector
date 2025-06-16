@@ -1,79 +1,72 @@
-from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
-from openai import OpenAI
-import requests, os
-from dotenv import load_dotenv
+from flask import Flask, request, jsonify
+import time
 
-load_dotenv()
+app = Flask(__name__)
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-WHOIS_API_KEY = os.getenv("WHOIS_API_KEY")
-GUMROAD_PRODUCT_ID = os.getenv("GUMROAD_PRODUCT_ID")
-
-app = Flask(__name__, template_folder='.')  # ⬅️ Tells Flask "index.html is in root"
-CORS(app)
-
+# Store reports temporarily
 temp_report_cache = {}
 
-def check_domain_info(domain):
-    url = f"https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey={WHOIS_API_KEY}&domainName={domain}&outputFormat=JSON"
-    try:
-        r = requests.get(url)
-        data = r.json()
-        reg = data["WhoisRecord"]["createdDate"]
-        org = data["WhoisRecord"]["registryData"]["registrant"]["organization"]
-        return f"Registered: {reg}\nOwner: {org}"
-    except:
-        return "Info not available."
+# Track free usage by IP
+free_usage_tracker = set()
 
+# Dummy function to simulate scam report generation
 def generate_scam_report(domain):
-    if domain in temp_report_cache:
-        return temp_report_cache[domain]
-    info = check_domain_info(domain)
-    prompt = f"Check if this is a scam: {domain}\nInfo: {info}"
-    res = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5, max_tokens=300
-    )
-    report = res.choices[0].message.content
-    temp_report_cache[domain] = report
-    return report
+    time.sleep(2)  # simulate processing time
+    return {
+        "domain": domain,
+        "scam_score": 75,
+        "details": "Suspicious patterns detected."
+    }
 
-def verify_gumroad_license(key):
-    url = "https://api.gumroad.com/v2/licenses/verify"
-    r = requests.post(url, data={
-        "product_permalink": GUMROAD_PRODUCT_ID,
-        "license_key": key
-    })
-    return r.json().get("success", False)
-
-@app.route('/')
+# === HOME ===
+@app.route("/")
 def home():
-    return render_template("index.html")  # ✅ this now works because index.html is in root
+    return "Scam Detector is running!"
 
+# === CHECK ROUTE (Handles free usage) ===
 @app.route('/check', methods=["POST"])
 def check():
     domain = request.json.get("domain")
-    if not domain:
-        return jsonify({"error": "No domain"}), 400
-    generate_scam_report(domain)
-    return jsonify({"status": "ready", "message": "Report is ready. Click below to unlock!"})
+    user_ip = request.remote_addr
 
+    if not domain:
+        return jsonify({"error": "No domain provided"}), 400
+
+    # Already used free check
+    if user_ip in free_usage_tracker:
+        return jsonify({
+            "status": "locked",
+            "message": "You've already used your free scam check. Unlock unlimited scans for just €2.",
+            "unlock_url": "https://akiagi3.gumroad.com/l/bhphh"  # Replace with your Gumroad product URL
+        })
+
+    # First-time free usage
+    free_usage_tracker.add(user_ip)
+    report = generate_scam_report(domain)
+    return jsonify({
+        "status": "unlocked",
+        "message": "This was your free scam check!",
+        "report": report
+    })
+
+# === UNLOCK ROUTE (For paid users with license key) ===
 @app.route('/unlock', methods=["POST"])
 def unlock():
-    data = request.json
-    domain = data.get("domain")
-    key = data.get("key")
-    if not domain or not key:
-        return jsonify({"error": "Missing domain or key"}), 400
-    if not verify_gumroad_license(key):
-        return jsonify({"error": "Invalid key"}), 403
-    report = temp_report_cache.get(domain)
-    if not report:
-        return jsonify({"error": "Report expired or not found"}), 404
-    return jsonify({"report": report})
+    domain = request.json.get("domain")
+    license_key = request.json.get("license_key")
 
+    # TODO: Add real license key verification here
+    if license_key != "SECRET123":  # Replace this logic with actual Gumroad verification
+        return jsonify({"error": "Invalid license key"}), 403
+
+    report = generate_scam_report(domain)
+    return jsonify({
+        "status": "unlocked",
+        "message": "Access granted via license key.",
+        "report": report
+    })
+
+# === RUN ===
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000, debug=True)
+    app.run(debug=True)
 
