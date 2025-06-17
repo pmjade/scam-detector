@@ -123,6 +123,3 @@ def unlock_page():
 @app.route("/ping")
 def ping():
     return "pong", 200
-
-if __name__ == "__main__":
-    app.run(debug=False)
