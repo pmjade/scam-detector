@@ -5,6 +5,10 @@ app = Flask(__name__)
 # Just store free checks by IP
 free_usage_tracker = set()
 
+@app.route("/ping")
+def ping():
+    return "pong", 200
+
 # Simulate scam detection
 def generate_scam_report(domain):
     return {
