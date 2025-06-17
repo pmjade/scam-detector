@@ -1,9 +1,23 @@
+import os
 from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
 
-# Just store free checks by IP
-free_usage_tracker = set()
+# Use a file for free check usage tracking
+USAGE_FILE = 'free_usage.txt'
+
+def load_usage():
+    if os.path.exists(USAGE_FILE):
+        with open(USAGE_FILE, 'r') as f:
+            return set(f.read().splitlines())
+    return set()
+
+def save_usage(usage_set):
+    with open(USAGE_FILE, 'w') as f:
+        for ip in usage_set:
+            f.write(ip + '\n')
+
+free_usage_tracker = load_usage()
 
 @app.route("/ping")
 def ping():
@@ -18,7 +32,7 @@ def generate_scam_report(domain):
     }
 
 # === BASIC HOME PAGE ===
-@app.route('/')
+@app.route("/")
 def home():
     return render_template_string("""
         <html>
@@ -44,7 +58,7 @@ def home():
     """)
 
 # === FREE CHECK FORM SUBMIT ===
-@app.route('/check', methods=["POST"])
+@app.route("/check", methods=["POST"])
 def check():
     domain = request.form.get("domain")
     user_ip = request.remote_addr
@@ -63,6 +77,7 @@ def check():
         """)
 
     free_usage_tracker.add(user_ip)
+    save_usage(free_usage_tracker) # Save usage after adding
     report = generate_scam_report(domain)
     return render_template_string(f"""
         <html><body>
@@ -74,7 +89,7 @@ def check():
     """)
 
 # === LICENSE KEY UNLOCK PAGE ===
-@app.route('/unlock-page')
+@app.route("/unlock-page")
 def unlock_page():
     return render_template_string("""
         <html><body>
@@ -89,12 +104,15 @@ def unlock_page():
     """)
 
 # === UNLOCK WITH LICENSE ===
-@app.route('/unlock', methods=["POST"])
+@app.route("/unlock", methods=["POST"])
 def unlock():
     domain = request.form.get("domain")
     license_key = request.form.get("license_key")
 
-    if license_key != "SECRET123":  # Replace with real check
+    # Get license key from environment variable
+    EXPECTED_LICENSE_KEY = os.environ.get('LICENSE_KEY', 'DEFAULT_SECRET_KEY') # Provide a default for local testing
+
+    if license_key != EXPECTED_LICENSE_KEY:
         return "<h2>❌ Invalid license key</h2><br><a href='/'>← Go Back</a>", 403
 
     report = generate_scam_report(domain)
@@ -107,5 +125,5 @@ def unlock():
         </body></html>
     """)
 
-# REMOVE this block entirely for production
-# Gunicorn handles it!
+if __name__ == "__main__":
+    app.run(debug=False) # Set debug to False for production
