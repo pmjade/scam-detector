@@ -107,5 +107,5 @@ def unlock():
         </body></html>
     """)
 
-if __name__ == "__main__":
-    app.run(debug=True)
+# REMOVE this block entirely for production
+# Gunicorn handles it!
