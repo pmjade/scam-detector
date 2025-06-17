@@ -141,3 +141,9 @@ def save_usage(ip):
     cur = db.cursor()
     cur.execute("INSERT INTO usage (ip) VALUES (%s) ON CONFLICT DO NOTHING", (ip,))
     db.commit()
+# Read the PORT that Railway gives us; default to 5000 if not set
+port = int(os.environ.get("PORT", 5000))
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=port, debug=False)
+
