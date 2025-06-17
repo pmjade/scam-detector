@@ -123,3 +123,21 @@ def unlock_page():
 @app.route("/ping")
 def ping():
     return "pong", 200
+import psycopg2  # Add this at the top of app.py
+
+# Replace your load_usage() and save_usage() with:
+def get_db():
+    return psycopg2.connect(os.environ["DATABASE_URL"])
+
+def load_usage():
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS usage (ip TEXT PRIMARY KEY)")
+    cur.execute("SELECT ip FROM usage")
+    return {row[0] for row in cur.fetchall()}
+
+def save_usage(ip):
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("INSERT INTO usage (ip) VALUES (%s) ON CONFLICT DO NOTHING", (ip,))
+    db.commit()
