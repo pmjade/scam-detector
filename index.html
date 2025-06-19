@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Scam Detector Pro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background-image: url('https://images.unsplash.com/photo-1521737604893-d14cc237f11d?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
+      background-size: cover;
+      background-position: center;
+      font-family: 'Georgia', serif;
+      color: white;
+    }
+    .glass {
+      background-color: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(12px);
+    }
+    .gold-button {
+      background-color: #ffd700;
+      color: black;
+      font-weight: bold;
+      transition: all 0.3s ease;
+    }
+    .gold-button:hover {
+      background-color: #ffec80;
+    }
+    .report-box {
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid #ffd700;
+      border-radius: 8px;
+      padding: 15px;
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+
+<body class="text-white">
+  <section class="min-h-screen flex flex-col justify-center items-center px-4">
+    <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full text-center">
+      <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Scam Detector Pro</h1>
+      <p class="text-lg mb-6">Check if a website is legit or a scam</p>
+
+      <input type="text" id="urlInput" placeholder="https://example.com" 
+             class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400">
+      <button id="checkBtn" class="gold-button w-full py-3 px-6 rounded-lg text-lg">
+        Check Website
+      </button>
+
+      <div id="resultContainer" class="mt-6 hidden">
+        <div id="freeResult" class="hidden">
+          <h2 class="text-xl font-bold mb-2">Your Free Report</h2>
+          <div id="reportContent" class="report-box text-left mt-4 mb-4 p-4"></div>
+          <p class="text-sm text-yellow-300 mb-4">Next check will require payment</p>
+        </div>
+        
+        <div id="lockedResult" class="hidden">
+          <div class="bg-red-900 bg-opacity-50 p-4 rounded-lg mb-4">
+            <p class="font-bold">🔒 Report Locked</p>
+            <p>You've used your free check. Unlock for $2 to view this report.</p>
+          </div>
+          <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
+            <button class="gold-button w-full py-3 px-6 rounded-lg mb-3">
+              Unlock Report - $2
+            </button>
+          </a>
+          <p class="text-sm">After payment, refresh this page to view your report</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    let currentSessionId = localStorage.getItem('scamDetectorSessionId') || 
+                          Math.random().toString(36).substring(2) + 
+                          Math.random().toString(36).substring(2);
+    
+    localStorage.setItem('scamDetectorSessionId', currentSessionId);
+
+    document.getElementById('checkBtn').addEventListener('click', async () => {
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return alert('Please enter a website URL');
+      
+      const checkBtn = document.getElementById('checkBtn');
+      checkBtn.disabled = true;
+      checkBtn.textContent = 'Analyzing...';
+      
+      try {
+        const response = await fetch('/check', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-ID': currentSessionId
+          },
+          body: JSON.stringify({ domain: url })
+        });
+        
+        const data = await response.json();
+        const resultContainer = document.getElementById('resultContainer');
+        resultContainer.classList.remove('hidden');
+        
+        if (data.status === 'free') {
+          // Show free result
+          document.getElementById('freeResult').classList.remove('hidden');
+          document.getElementById('lockedResult').classList.add('hidden');
+          document.getElementById('reportContent').textContent = data.report;
+        } 
+        else if (data.status === 'unlocked') {
+          // Show unlocked result
+          document.getElementById('freeResult').classList.remove('hidden');
+          document.getElementById('lockedResult').classList.add('hidden');
+          document.getElementById('reportContent').textContent = data.report;
+        }
+        else {
+          // Show locked message
+          document.getElementById('freeResult').classList.add('hidden');
+          document.getElementById('lockedResult').classList.remove('hidden');
+        }
+      } catch (error) {
+        alert('Error checking website: ' + error.message);
+      } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Check Website';
+      }
+    });
+  </script>
+</body>
+</html>
