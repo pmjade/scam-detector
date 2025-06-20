@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -72,56 +72,76 @@
     </div>
   </section>
 
-  <script><script>
-  // 👶 Check if user already has a session ID stored in localStorage
-  let currentSessionId = localStorage.getItem('scamDetectorSessionId');
-
-  // If not, generate one and save it in localStorage
-  if (!currentSessionId) {
-    currentSessionId = crypto.randomUUID(); // ✅ more secure & readable than random + substring
-    localStorage.setItem('scamDetectorSessionId', currentSessionId);
-  }
-
-  // When user clicks "Check Website"
-  document.getElementById('checkBtn').addEventListener('click', async () => {
-    const url = document.getElementById('urlInput').value.trim();
-    if (!url) return alert('Please enter a website URL');
-
-    const checkBtn = document.getElementById('checkBtn');
-    checkBtn.disabled = true;
-    checkBtn.textContent = 'Analyzing...';
-
-    try {
-      const response = await fetch('/check', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-ID': currentSessionId // 👈 Send the session ID with every request
-        },
-        body: JSON.stringify({ domain: url })
-      });
-
-      const data = await response.json();
-      const resultContainer = document.getElementById('resultContainer');
-      resultContainer.classList.remove('hidden');
-
-      // ✅ Decide what to show based on backend response
-      if (data.status === 'free' || data.status === 'unlocked') {
-        document.getElementById('freeResult').classList.remove('hidden');
-        document.getElementById('lockedResult').classList.add('hidden');
-        document.getElementById('reportContent').textContent = data.report;
-      } else {
-        document.getElementById('freeResult').classList.add('hidden');
-        document.getElementById('lockedResult').classList.remove('hidden');
-      }
-
-    } catch (error) {
-      alert('Error checking website: ' + error.message);
-    } finally {
-      checkBtn.disabled = false;
-      checkBtn.textContent = 'Check Website';
+  <script>
+    function setCookie(name, value, days) {
+      const d = new Date();
+      d.setTime(d.getTime() + (days*24*60*60*1000));
+      const expires = "expires=" + d.toUTCString();
+      document.cookie = name + "=" + value + ";" + expires + ";path=/";
     }
-  });
-</script>
+
+    function getCookie(name) {
+      const cname = name + "=";
+      const decodedCookie = decodeURIComponent(document.cookie);
+      const ca = decodedCookie.split(';');
+      for(let i = 0; i < ca.length; i++) {
+        let c = ca[i].trim();
+        if (c.indexOf(cname) == 0) {
+          return c.substring(cname.length, c.length);
+        }
+      }
+      return "";
+    }
+
+    const alreadyUsed = getCookie("used_free_check");
+
+    document.getElementById('checkBtn').addEventListener('click', async () => {
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return alert('Please enter a website URL');
+
+      const checkBtn = document.getElementById('checkBtn');
+      checkBtn.disabled = true;
+      checkBtn.textContent = 'Analyzing...';
+
+      try {
+        const response = await fetch('/check', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ domain: url })
+        });
+
+        const data = await response.json();
+        const resultContainer = document.getElementById('resultContainer');
+        resultContainer.classList.remove('hidden');
+
+        if (!alreadyUsed && data.status === 'free') {
+          // First-time user
+          setCookie("used_free_check", "true", 30);
+          document.getElementById('freeResult').classList.remove('hidden');
+          document.getElementById('lockedResult').classList.add('hidden');
+          document.getElementById('reportContent').textContent = data.report;
+        } 
+        else if (data.status === 'unlocked') {
+          // Paid access
+          document.getElementById('freeResult').classList.remove('hidden');
+          document.getElementById('lockedResult').classList.add('hidden');
+          document.getElementById('reportContent').textContent = data.report;
+        }
+        else {
+          // Used up free check
+          document.getElementById('freeResult').classList.add('hidden');
+          document.getElementById('lockedResult').classList.remove('hidden');
+        }
+
+      } catch (error) {
+        alert('Error checking website: ' + error.message);
+      } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Check Website';
+      }
+    });
+  </script>
 </body>
 </html>
