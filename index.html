@@ -22,12 +22,9 @@
       color: black;
       font-weight: bold;
       transition: all 0.3s ease;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .gold-button:hover {
       background-color: #ffec80;
-      transform: translateY(-1px);
-      box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
     }
     .report-box {
       background: rgba(0, 0, 0, 0.5);
@@ -47,25 +44,10 @@
       height: 20px;
       animation: spin 1s linear infinite;
       display: inline-block;
-      vertical-align: middle;
       margin-right: 8px;
     }
     @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-    .premium-badge {
-      background: linear-gradient(90deg, #ffd700, #ff9100);
-      animation: pulse 2s infinite;
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 0.8rem;
-    }
-    @keyframes pulse {
-      0% { opacity: 0.8; }
-      50% { opacity: 1; }
-      100% { opacity: 0.8; }
+      to { transform: rotate(360deg); }
     }
   </style>
 </head>
@@ -74,18 +56,15 @@
   <section class="min-h-screen flex flex-col justify-center items-center px-4">
     <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full text-center">
       <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Verifina.pro</h1>
-      <p class="text-lg mb-6">Check if any website is a scam - First check FREE!</p>
+      <p class="text-lg mb-6">Check if any website is a scam - First check FREE, then $2</p>
 
       <input 
         type="text" 
         id="urlInput" 
         placeholder="https://example.com" 
-        class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-300"
+        class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400"
       >
-      <button 
-        id="checkBtn" 
-        class="gold-button w-full py-3 px-6 rounded-lg text-lg mb-4"
-      >
+      <button id="checkBtn" class="gold-button w-full py-3 px-6 rounded-lg text-lg mb-4">
         Check Website
       </button>
 
@@ -99,105 +78,53 @@
         <div id="lockedResult" class="hidden">
           <div class="bg-red-900 bg-opacity-50 p-4 rounded-lg mb-4">
             <p class="font-bold">🔒 Report Locked</p>
-            <p>You've used your free check. Unlock unlimited reports for $2!</p>
+            <p>You've used your free check. Unlock unlimited reports for just $2!</p>
           </div>
-          <button id="unlockBtn" class="gold-button w-full py-3 px-6 rounded-lg mb-3">
-            Unlock Unlimited Checks - $2
-          </button>
-          <p class="text-sm text-gray-300">Instant access after payment</p>
+          <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
+            <button class="gold-button w-full py-3 px-6 rounded-lg mb-3">
+              Unlock Unlimited Checks - $2
+            </button>
+          </a>
+          <p class="text-sm text-gray-300">After payment, refresh the page</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Payment Success Modal -->
-  <div id="successModal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex items-center justify-center z-50">
-    <div class="glass p-8 rounded-xl max-w-md w-full mx-4 text-center">
-      <h2 class="text-2xl font-bold text-green-400 mb-4">🎉 Payment Successful!</h2>
-      <p class="mb-6">Your premium access has been activated. You can now check unlimited websites.</p>
-      <button onclick="closeModal()" class="gold-button px-6 py-2 rounded-lg">
-        Start Checking
-      </button>
-    </div>
-  </div>
-
   <script>
-    // Handle payment flow
-    document.getElementById('unlockBtn')?.addEventListener('click', () => {
-      window.open(
-        'https://akiagi3.gumroad.com/l/bhphh?wanted=true', 
-        '_blank',
-        'noopener noreferrer'
-      );
-      
-      // Check payment status every 3 seconds
-      const paymentCheck = setInterval(async () => {
-        try {
-          const res = await fetch('/verify-payment', { credentials: 'include' });
-          if (res.ok) {
-            clearInterval(paymentCheck);
-            document.getElementById('successModal').classList.remove('hidden');
-          }
-        } catch (e) {
-          console.error('Payment check failed:', e);
-        }
-      }, 3000);
-    });
-
-    function closeModal() {
-      document.getElementById('successModal').classList.add('hidden');
-      location.reload(); // Refresh to activate premium
-    }
-
-    // Check URL for payment success
-    if (new URLSearchParams(window.location.search).has('payment')) {
-      document.getElementById('successModal').classList.remove('hidden');
-      history.replaceState({}, '', '/'); // Clean URL
-    }
-
-    // Existing check functionality
     document.getElementById('checkBtn').addEventListener('click', async () => {
       const url = document.getElementById('urlInput').value.trim();
       if (!url) return alert('Please enter a website URL');
-      
+
       const checkBtn = document.getElementById('checkBtn');
       checkBtn.disabled = true;
       checkBtn.innerHTML = '<span class="spinner"></span> Analyzing...';
-      
+
       try {
         const response = await fetch('/check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ domain: url }),
-          credentials: 'include'
+          credentials: 'include',
+          body: JSON.stringify({ domain: url })
         });
-        
-        if (!response.ok) throw new Error(await response.text());
-        
+
         const data = await response.json();
         const resultContainer = document.getElementById('resultContainer');
         resultContainer.classList.remove('hidden');
-        
-        if (data.status === 'free') {
+
+        if (data.status === 'free' || data.status === 'unlocked') {
           document.getElementById('freeResult').classList.remove('hidden');
           document.getElementById('lockedResult').classList.add('hidden');
           document.getElementById('reportContent').textContent = data.report;
           document.getElementById('usageCounter').textContent = 
-            data.remaining > 0 
-              ? `You have ${data.remaining} free check(s) remaining` 
-              : "You've used your free check";
-        } 
-        else if (data.status === 'unlocked') {
-          document.getElementById('freeResult').classList.remove('hidden');
-          document.getElementById('lockedResult').classList.add('hidden');
-          document.getElementById('reportContent').textContent = data.report;
-          document.getElementById('usageCounter').innerHTML = 
-            '<span class="premium-badge">✅ PREMIUM MEMBER</span>';
-        }
-        else {
+            data.status === 'free'
+              ? "⚠️ You have used your free check. Upgrade for unlimited access."
+              : "✅ Unlimited access unlocked!";
+        } else {
           document.getElementById('freeResult').classList.add('hidden');
           document.getElementById('lockedResult').classList.remove('hidden');
         }
+
       } catch (error) {
         alert('Error: ' + error.message);
       } finally {
