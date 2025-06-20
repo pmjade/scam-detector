@@ -1,100 +1,93 @@
-from flask import Flask, request, jsonify, send_from_directory 
+from flask import Flask, request, jsonify, send_from_directory, make_response
+from flask_cors import CORS
 from openai import OpenAI
 import os
-import requests
-from dotenv import load_dotenv
-from flask_cors import CORS
 import uuid
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import requests
 
 # Load environment variables
 load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
+CORS(app, supports_credentials=True)
 
-# Initialize API clients
+# OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-REDDIT_API_KEY = os.getenv("REDDIT_API_KEY")
 
-# Track usage and cache
-usage_tracker = {}
-paid_sessions = set()
+# Sessions and cache
+sessions = {}
 analysis_cache = {}
-GUMROAD_PRODUCT_URL = "https://akiagi3.gumroad.com/l/bhphh"
 
+# Get Reddit discussions
 def get_reddit_sentiment(domain):
-    """Fetch Reddit discussions about the domain"""
-    headers = {'User-agent': 'ScamDetectorBot/1.0'}
     try:
-        response = requests.get(
-            f"https://www.reddit.com/search.json?q={domain}&limit=5",
-            headers=headers
-        )
-        posts = response.json().get('data', {}).get('children', [])
+        url = f"https://www.reddit.com/search.json?q={domain}&sort=new"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
+        posts = response.json().get("data", {}).get("children", [])
         
         discussions = []
-        for post in posts:
-            title = post['data'].get('title', '')
-            comments = post['data'].get('num_comments', 0)
-            if comments > 0:
-                discussions.append(f"{title} ({comments} comments)")
+        for post in posts[:5]:
+            data = post.get("data", {})
+            title = data.get("title", "")
+            score = data.get("score", 0)
+            subreddit = data.get("subreddit", "")
+            discussions.append(f"r/{subreddit} ({score} upvotes): {title}")
         
-        return discussions[:3] if discussions else ["No recent discussions found"]
+        return discussions if discussions else ["No major Reddit discussions found."]
     except Exception as e:
-        print(f"Reddit API error: {e}")
-        return ["Could not fetch Reddit data"]
+        return [f"Reddit fetch error: {str(e)}"]
 
+# Analyze website
 def analyze_website(domain):
-    """Enhanced website analysis with real-time data"""
     cache_key = domain.lower()
     if cache_key in analysis_cache:
         if datetime.now() < analysis_cache[cache_key]['expires']:
             return analysis_cache[cache_key]['report']
-    
-    reddit_discussions = get_reddit_sentiment(domain)
-    
-    prompt = f"""
-    Analyze this website for legitimacy: {domain}
-    
-    **Recent Reddit Discussions:**
-    {chr(10).join(reddit_discussions)}
-    
-    **Required Analysis:**
-    1. Verify domain authenticity (.gov.vn etc.)
-    2. Analyze Reddit sentiment
-    3. Check for common scam patterns
-    4. Evaluate professional indicators
-    
-    **Response Format:**
-    
-    🚨 SCAM RISK: XX% (or "Confirmed Legitimate")
-    
-    🔍 Verification:
-    - Domain Type: [.gov/.com/etc.]
-    - SSL Security: [Yes/No]
-    - Known Official: [Yes/No/Uncertain]
-    
-    📊 Community Reports:
-    {chr(10).join(f"- {d}" for d in reddit_discussions)}
-    
-    if not results:
-    return "No major Reddit discussions found. Consider searching manually for user experiences."
 
-    ⚠️ Red Flags:
-    1.
-    2.
-    3.
-    
-    ✅ Trust Indicators:
-    1.
-    2.
-    
-    💡 Final Recommendation:
-    [2-3 sentence verdict]
-    """
-    
+    reddit_discussions = get_reddit_sentiment(domain)
+
+    prompt = f"""
+Analyze this website for legitimacy: {domain}
+
+**Recent Reddit Discussions:**
+{chr(10).join(reddit_discussions)}
+
+**Required Analysis:**
+1. Verify domain authenticity (.gov.vn etc.)
+2. Analyze Reddit sentiment
+3. Check for common scam patterns
+4. Evaluate professional indicators
+
+**Response Format:**
+
+🚨 SCAM RISK: XX% (or "Confirmed Legitimate")
+
+🔍 Verification:
+- Domain Type: [.gov/.com/etc.]
+- SSL Security: [Yes/No]
+- Known Official: [Yes/No/Uncertain]
+
+📊 Community Reports:
+{chr(10).join(f"- {d}" for d in reddit_discussions)}
+
+⚠️ Red Flags:
+1.
+2.
+3.
+
+✅ Trust Indicators:
+1.
+2.
+
+💡 Final Recommendation:
+[2-3 sentence verdict]
+"""
+
     try:
         response = client.chat.completions.create(
             model="gpt-4-turbo",
@@ -102,12 +95,12 @@ def analyze_website(domain):
             temperature=0.2
         )
         report = response.choices[0].message.content.strip()
-        
+
         analysis_cache[cache_key] = {
             'report': report,
             'expires': datetime.now() + timedelta(hours=6)
         }
-        
+
         return report
     except Exception as e:
         return f"🚨 ANALYSIS FAILED\nError: {str(e)}"
@@ -124,59 +117,46 @@ def check_domain():
     if not domain:
         return jsonify({"error": "No domain provided"}), 400
 
-    session_id = request.headers.get('X-Session-ID', str(uuid.uuid4()))
+    # Get or create session ID from cookie
+    session_id = request.cookies.get('session_id', str(uuid.uuid4()))
+    
+    if session_id not in sessions:
+        sessions[session_id] = {
+            'free_checks_remaining': 1,
+            'paid': False,
+            'created_at': datetime.now()
+        }
 
-    if session_id not in usage_tracker:
-        usage_tracker[session_id] = {"free_used": False, "paid": False}
+    # Access check logic
+    if sessions[session_id]['paid'] or sessions[session_id]['free_checks_remaining'] > 0:
+        report = analyze_website(domain)
 
-    session_info = usage_tracker[session_id]
+        if not sessions[session_id]['paid']:
+            sessions[session_id]['free_checks_remaining'] -= 1
 
-    if not session_info["free_used"]:
-        session_info["free_used"] = True
-        analysis = analyze_website(domain)
-        return jsonify({
-            "status": "free",
-            "report": analysis,
-            "session_id": session_id
+        status = "unlocked" if sessions[session_id]['paid'] else "free"
+        response = jsonify({
+            "status": status,
+            "report": report
         })
-    elif session_info["paid"]:
-        analysis = analyze_website(domain)
-        return jsonify({
-            "status": "unlocked",
-            "report": analysis,
-            "session_id": session_id
-        })
+
+        # Cookie for session tracking
+        response.set_cookie(
+            'session_id',
+            value=session_id,
+            max_age=30*24*60*60,
+            httponly=True,
+            samesite='Lax'
+        )
+
+        return response
+
     else:
         return jsonify({
             "status": "locked",
-            "payment_url": f"{GUMROAD_PRODUCT_URL}?note={session_id}",
-            "message": "First check was free. Unlock more checks for $2."
+            "payment_url": "https://akiagi3.gumroad.com/l/bhphh"
         })
 
-@app.route('/unlock', methods=['POST'])
-def unlock_session():
-    data = request.get_json()
-    session_id = data.get('session_id')
-    
-    if not session_id:
-        return jsonify({"error": "No session ID provided"}), 400
-    
-    usage_tracker[session_id] = {"free_used": True, "paid": True}
-    return jsonify({"status": "unlocked", "message": "Session unlocked successfully."})
-
-@app.route('/gumroad_webhook', methods=['POST'])
-def gumroad_webhook():
-    form = request.form
-    session_id = form.get('note')
-    sale_id = form.get('sale_id')
-
-    if not session_id or not sale_id:
-        return "Invalid webhook", 400
-
-    usage_tracker[session_id] = {"free_used": True, "paid": True}
-    paid_sessions.add(session_id)
-
-    return "OK", 200
-
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
+
