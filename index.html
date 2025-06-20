@@ -72,59 +72,56 @@
     </div>
   </section>
 
-  <script>
-    let currentSessionId = localStorage.getItem('scamDetectorSessionId') || 
-                          Math.random().toString(36).substring(2) + 
-                          Math.random().toString(36).substring(2);
-    
-    localStorage.setItem('scamDetectorSessionId', currentSessionId);
+  <script><script>
+  // 👶 Check if user already has a session ID stored in localStorage
+  let currentSessionId = localStorage.getItem('scamDetectorSessionId');
 
-    document.getElementById('checkBtn').addEventListener('click', async () => {
-      const url = document.getElementById('urlInput').value.trim();
-      if (!url) return alert('Please enter a website URL');
-      
-      const checkBtn = document.getElementById('checkBtn');
-      checkBtn.disabled = true;
-      checkBtn.textContent = 'Analyzing...';
-      
-      try {
-        const response = await fetch('/check', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Session-ID': currentSessionId
-          },
-          body: JSON.stringify({ domain: url })
-        });
-        
-        const data = await response.json();
-        const resultContainer = document.getElementById('resultContainer');
-        resultContainer.classList.remove('hidden');
-        
-        if (data.status === 'free') {
-          // Show free result
-          document.getElementById('freeResult').classList.remove('hidden');
-          document.getElementById('lockedResult').classList.add('hidden');
-          document.getElementById('reportContent').textContent = data.report;
-        } 
-        else if (data.status === 'unlocked') {
-          // Show unlocked result
-          document.getElementById('freeResult').classList.remove('hidden');
-          document.getElementById('lockedResult').classList.add('hidden');
-          document.getElementById('reportContent').textContent = data.report;
-        }
-        else {
-          // Show locked message
-          document.getElementById('freeResult').classList.add('hidden');
-          document.getElementById('lockedResult').classList.remove('hidden');
-        }
-      } catch (error) {
-        alert('Error checking website: ' + error.message);
-      } finally {
-        checkBtn.disabled = false;
-        checkBtn.textContent = 'Check Website';
+  // If not, generate one and save it in localStorage
+  if (!currentSessionId) {
+    currentSessionId = crypto.randomUUID(); // ✅ more secure & readable than random + substring
+    localStorage.setItem('scamDetectorSessionId', currentSessionId);
+  }
+
+  // When user clicks "Check Website"
+  document.getElementById('checkBtn').addEventListener('click', async () => {
+    const url = document.getElementById('urlInput').value.trim();
+    if (!url) return alert('Please enter a website URL');
+
+    const checkBtn = document.getElementById('checkBtn');
+    checkBtn.disabled = true;
+    checkBtn.textContent = 'Analyzing...';
+
+    try {
+      const response = await fetch('/check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-ID': currentSessionId // 👈 Send the session ID with every request
+        },
+        body: JSON.stringify({ domain: url })
+      });
+
+      const data = await response.json();
+      const resultContainer = document.getElementById('resultContainer');
+      resultContainer.classList.remove('hidden');
+
+      // ✅ Decide what to show based on backend response
+      if (data.status === 'free' || data.status === 'unlocked') {
+        document.getElementById('freeResult').classList.remove('hidden');
+        document.getElementById('lockedResult').classList.add('hidden');
+        document.getElementById('reportContent').textContent = data.report;
+      } else {
+        document.getElementById('freeResult').classList.add('hidden');
+        document.getElementById('lockedResult').classList.remove('hidden');
       }
-    });
-  </script>
+
+    } catch (error) {
+      alert('Error checking website: ' + error.message);
+    } finally {
+      checkBtn.disabled = false;
+      checkBtn.textContent = 'Check Website';
+    }
+  });
+</script>
 </body>
 </html>
