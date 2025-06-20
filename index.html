@@ -1,9 +1,9 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Scam Detector Pro</title>
+  <title>Verifina.pro - Scam Detector</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body {
@@ -22,9 +22,12 @@
       color: black;
       font-weight: bold;
       transition: all 0.3s ease;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .gold-button:hover {
       background-color: #ffec80;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
     }
     .report-box {
       background: rgba(0, 0, 0, 0.5);
@@ -33,6 +36,23 @@
       padding: 15px;
       white-space: pre-wrap;
       font-family: 'Courier New', monospace;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 3px solid #ffd700;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
   </style>
 </head>
@@ -40,108 +60,98 @@
 <body class="text-white">
   <section class="min-h-screen flex flex-col justify-center items-center px-4">
     <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full text-center">
-      <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Scam Detector Pro</h1>
-      <p class="text-lg mb-6">Check if a website is legit or a scam</p>
+      <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Verifina.pro</h1>
+      <p class="text-lg mb-6">Check if any website is a scam - First check FREE!</p>
 
-      <input type="text" id="urlInput" placeholder="https://example.com" 
-             class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400">
-      <button id="checkBtn" class="gold-button w-full py-3 px-6 rounded-lg text-lg">
+      <input 
+        type="text" 
+        id="urlInput" 
+        placeholder="https://example.com" 
+        class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-300"
+      >
+      <button 
+        id="checkBtn" 
+        class="gold-button w-full py-3 px-6 rounded-lg text-lg mb-4"
+      >
         Check Website
       </button>
 
       <div id="resultContainer" class="mt-6 hidden">
         <div id="freeResult" class="hidden">
-          <h2 class="text-xl font-bold mb-2">Your Free Report</h2>
+          <h2 class="text-xl font-bold mb-2">Your Report</h2>
           <div id="reportContent" class="report-box text-left mt-4 mb-4 p-4"></div>
-          <p class="text-sm text-yellow-300 mb-4">Next check will require payment</p>
+          <p id="usageCounter" class="text-sm text-yellow-300 mb-4"></p>
         </div>
         
         <div id="lockedResult" class="hidden">
           <div class="bg-red-900 bg-opacity-50 p-4 rounded-lg mb-4">
             <p class="font-bold">🔒 Report Locked</p>
-            <p>You've used your free check. Unlock for $2 to view this report.</p>
+            <p>You've used your free check. Unlock unlimited reports for $3!</p>
           </div>
           <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
             <button class="gold-button w-full py-3 px-6 rounded-lg mb-3">
-              Unlock Report - $2
+              Unlock Unlimited Checks - $3
             </button>
           </a>
-          <p class="text-sm">After payment, refresh this page to view your report</p>
+          <p class="text-sm text-gray-300">After payment, refresh this page</p>
         </div>
       </div>
     </div>
   </section>
 
   <script>
-    function setCookie(name, value, days) {
-      const d = new Date();
-      d.setTime(d.getTime() + (days*24*60*60*1000));
-      const expires = "expires=" + d.toUTCString();
-      document.cookie = name + "=" + value + ";" + expires + ";path=/";
-    }
-
-    function getCookie(name) {
-      const cname = name + "=";
-      const decodedCookie = decodeURIComponent(document.cookie);
-      const ca = decodedCookie.split(';');
-      for(let i = 0; i < ca.length; i++) {
-        let c = ca[i].trim();
-        if (c.indexOf(cname) == 0) {
-          return c.substring(cname.length, c.length);
-        }
-      }
-      return "";
-    }
-
-    const alreadyUsed = getCookie("used_free_check");
-
     document.getElementById('checkBtn').addEventListener('click', async () => {
       const url = document.getElementById('urlInput').value.trim();
       if (!url) return alert('Please enter a website URL');
-
+      
       const checkBtn = document.getElementById('checkBtn');
       checkBtn.disabled = true;
-      checkBtn.textContent = 'Analyzing...';
-
+      checkBtn.innerHTML = '<span class="spinner"></span> Analyzing...';
+      
       try {
         const response = await fetch('/check', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ domain: url })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain: url }),
+          credentials: 'include' // Required for cookies
         });
-
+        
+        if (!response.ok) throw new Error(await response.text());
+        
         const data = await response.json();
         const resultContainer = document.getElementById('resultContainer');
         resultContainer.classList.remove('hidden');
-
-        if (!alreadyUsed && data.status === 'free') {
-          // First-time user
-          setCookie("used_free_check", "true", 30);
+        
+        if (data.status === 'free') {
           document.getElementById('freeResult').classList.remove('hidden');
           document.getElementById('lockedResult').classList.add('hidden');
           document.getElementById('reportContent').textContent = data.report;
+          document.getElementById('usageCounter').textContent = 
+            "You have 0 free checks remaining. Upgrade for unlimited!";
         } 
         else if (data.status === 'unlocked') {
-          // Paid access
           document.getElementById('freeResult').classList.remove('hidden');
           document.getElementById('lockedResult').classList.add('hidden');
           document.getElementById('reportContent').textContent = data.report;
+          document.getElementById('usageCounter').textContent = 
+            "✅ Unlimited checks (Premium User)";
         }
         else {
-          // Used up free check
           document.getElementById('freeResult').classList.add('hidden');
           document.getElementById('lockedResult').classList.remove('hidden');
         }
-
       } catch (error) {
-        alert('Error checking website: ' + error.message);
+        alert('Error: ' + error.message);
       } finally {
         checkBtn.disabled = false;
         checkBtn.textContent = 'Check Website';
       }
     });
+
+    // Check if coming back from Gumroad payment
+    if (window.location.search.includes('payment_success=true')) {
+      alert('Payment successful! Refresh to activate premium features.');
+    }
   </script>
 </body>
 </html>
