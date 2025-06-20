@@ -132,6 +132,16 @@
         checkBtn.textContent = 'Check Website';
       }
     });
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.has('payment') && urlParams.get('payment') === 'success') {
+    alert('Payment successful! Premium features unlocked.');
+    fetch('/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ domain: 'status-check' })
+    });
+}
   </script>
 </body>
 </html>
