@@ -6,7 +6,6 @@
   <title>Verifina.pro - Scam Detector</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    /* [Keep all your existing styles] */
     .premium-badge {
       background: linear-gradient(90deg, #ffd700, #ff9100);
       animation: pulse 2s infinite;
@@ -19,31 +18,51 @@
   </style>
 </head>
 
-<body class="text-white">
-  <!-- [Keep your existing HTML structure] -->
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center justify-start pt-10 px-4">
+
+  <!-- 🔍 Main Scanner UI -->
+  <h1 class="text-3xl font-bold text-yellow-400 mb-6">🔎 Verifina Scam Detector</h1>
   
-  <!-- Add payment success modal -->
+  <div class="w-full max-w-md">
+    <input id="domainInput" type="text" placeholder="Enter website URL..." class="w-full p-3 rounded text-black mb-4" />
+    <button id="checkBtn" class="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-2 px-4 rounded">
+      Check Website
+    </button>
+    
+    <div id="resultContainer" class="mt-6 bg-gray-800 p-4 rounded hidden">
+      <div id="reportText" class="whitespace-pre-line text-sm"></div>
+      <div id="usageCounter" class="mt-2 text-yellow-300 text-xs"></div>
+    </div>
+  </div>
+
+  <!-- ✅ Contact Info Footer -->
+  <footer class="mt-10 text-center text-sm text-yellow-200">
+    <p>Need help or want to report an issue?</p>
+    <p>📩 Contact us: 
+      <a href="mailto:verifina.pro@gmail.com" class="underline text-yellow-300">
+        verifina.pro@gmail.com
+      </a>
+    </p>
+  </footer>
+
+  <!-- 🎉 Payment Modal -->
   <div id="paymentModal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex items-center justify-center z-50">
-    <div class="glass p-8 rounded-xl max-w-md text-center">
+    <div class="glass p-8 rounded-xl max-w-md text-center bg-gray-800 border border-yellow-400">
       <h2 class="text-2xl font-bold text-green-400 mb-4">🎉 Payment Successful!</h2>
       <p class="mb-6">Your premium access has been activated. Close this message to continue.</p>
-      <button onclick="closePaymentModal()" class="gold-button px-6 py-2 rounded-lg">
+      <button onclick="closePaymentModal()" class="bg-yellow-400 text-black font-bold px-6 py-2 rounded-lg">
         Continue
       </button>
     </div>
   </div>
 
+  <!-- 🧠 Scripts -->
   <script>
-    // Handle payment callback
     document.addEventListener('DOMContentLoaded', () => {
       const params = new URLSearchParams(window.location.search);
-      
-      if (params.has('payment')) {
-        if (params.get('payment') === 'success') {
-          showPaymentModal();
-          // Clear the URL
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
+      if (params.has('payment') && params.get('payment') === 'success') {
+        showPaymentModal();
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
     });
 
@@ -53,7 +72,7 @@
 
     function closePaymentModal() {
       document.getElementById('paymentModal').classList.add('hidden');
-      checkAccountStatus(); // Refresh status
+      checkAccountStatus();
     }
 
     async function checkAccountStatus() {
@@ -64,7 +83,7 @@
           body: JSON.stringify({ domain: 'status-check' }),
           credentials: 'include'
         });
-        
+
         const data = await response.json();
         if (data.status === 'unlocked') {
           document.getElementById('usageCounter').textContent = "✅ Premium Member";
@@ -75,7 +94,31 @@
       }
     }
 
-    // [Keep your existing checkBtn event listener]
+    document.getElementById('checkBtn').addEventListener('click', async () => {
+      const domain = document.getElementById('domainInput').value.trim();
+      if (!domain) return alert("Please enter a domain.");
+
+      const response = await fetch('/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain }),
+        credentials: 'include'
+      });
+
+      const data = await response.json();
+      const resultContainer = document.getElementById('resultContainer');
+      const reportText = document.getElementById('reportText');
+      const usageCounter = document.getElementById('usageCounter');
+
+      if (data.status === 'locked') {
+        window.location.href = data.payment_url;
+      } else {
+        resultContainer.classList.remove('hidden');
+        reportText.textContent = data.report;
+        usageCounter.textContent = `🧾 Remaining checks: ${data.remaining_checks}`;
+      }
+    });
   </script>
 </body>
 </html>
+
