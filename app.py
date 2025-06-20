@@ -1,57 +1,119 @@
-from flask import Flask, request, jsonify, send_from_directory, make_response, redirect
-from flask_cors import CORS
+from flask import Flask, request, jsonify, send_from_directory
 from openai import OpenAI
 import os
-import uuid
 import requests
-from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from flask_cors import CORS
+import uuid
+from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
-CORS(app, supports_credentials=True, origins=["https://verifina.pro"])
+CORS(app)
 
-# Initialize OpenAI
+# Initialize API clients
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+REDDIT_API_KEY = os.getenv("REDDIT_API_KEY")
 
-# Server-side session storage (use Redis in production)
-sessions = {}
+# Track usage and cache
+usage_tracker = {}
+paid_sessions = set()
+analysis_cache = {}
 GUMROAD_PRODUCT_URL = "https://akiagi3.gumroad.com/l/bhphh"
-GUMROAD_API_KEY = os.getenv("GUMROAD_API_KEY")
+
+def get_reddit_sentiment(domain):
+    """Fetch Reddit discussions about the domain"""
+    headers = {'User-agent': 'ScamDetectorBot/1.0'}
+    try:
+        response = requests.get(
+            f"https://www.reddit.com/search.json?q={domain}&limit=5",
+            headers=headers
+        )
+        posts = response.json().get('data', {}).get('children', [])
+        
+        discussions = []
+        for post in posts:
+            title = post['data'].get('title', '')
+            comments = post['data'].get('num_comments', 0)
+            if comments > 0:
+                discussions.append(f"{title} ({comments} comments)")
+        
+        return discussions[:3] if discussions else ["No recent discussions found"]
+    except Exception as e:
+        print(f"Reddit API error: {e}")
+        return ["Could not fetch Reddit data"]
 
 def analyze_website(domain):
-    """Enhanced website analysis with real checks"""
+    """Enhanced website analysis with real-time data"""
+    # Check cache first
+    cache_key = domain.lower()
+    if cache_key in analysis_cache:
+        if datetime.now() < analysis_cache[cache_key]['expires']:
+            return analysis_cache[cache_key]['report']
+    
+    # Get external data
+    reddit_discussions = get_reddit_sentiment(domain)
+    
+    prompt = f"""
+    Analyze this website for legitimacy: {domain}
+    
+    **Recent Reddit Discussions:**
+    {chr(10).join(reddit_discussions)}
+    
+    **Required Analysis:**
+    1. Verify domain authenticity (.gov.vn etc.)
+    2. Analyze Reddit sentiment
+    3. Check for common scam patterns
+    4. Evaluate professional indicators
+    
+    **Response Format:**
+    
+    🚨 SCAM RISK: XX% (or "Confirmed Legitimate")
+    
+    🔍 Verification:
+    - Domain Type: [.gov/.com/etc.]
+    - SSL Security: [Yes/No]
+    - Known Official: [Yes/No/Uncertain]
+    
+    📊 Community Reports:
+    {chr(10).join(f"- {d}" for d in reddit_discussions)}
+    
+    if not results:
+    return "No major Reddit discussions found. Consider searching manually for user experiences."
+
+    ⚠️ Red Flags:
+    1.
+    2.
+    3.
+    
+    ✅ Trust Indicators:
+    1.
+    2.
+    
+    💡 Final Recommendation:
+    [2-3 sentence verdict]
+    """
+    
     try:
         response = client.chat.completions.create(
             model="gpt-4-turbo",
-            messages=[{
-                "role": "user",
-                "content": f"Analyze this website for scams: {domain}\n\nCheck domain, SSL, reviews, and provide risk percentage."
-            }],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.2
         )
-        return response.choices[0].message.content
+        report = response.choices[0].message.content.strip()
+        
+        # Cache results for 6 hours
+        analysis_cache[cache_key] = {
+            'report': report,
+            'expires': datetime.now() + timedelta(hours=6)
+        }
+        
+        return report
     except Exception as e:
-        return f"🚨 ANALYSIS ERROR\n{str(e)}"
-
-def verify_gumroad_purchase(sale_id):
-    """Verify payment with Gumroad API"""
-    try:
-        response = requests.post(
-            "https://api.gumroad.com/v2/sales/verify",
-            data={
-                "product_id": "bhphh",
-                "sale_id": sale_id
-            },
-            auth=(GUMROAD_API_KEY, "")
-        )
-        return response.json().get("success", False)
-    except:
-        return False
+        return f"🚨 ANALYSIS FAILED\nError: {str(e)}"
 
 @app.route('/')
 def home():
@@ -65,58 +127,21 @@ def check_domain():
     if not domain:
         return jsonify({"error": "No domain provided"}), 400
 
-    session_id = request.cookies.get('session_id', str(uuid.uuid4()))
+    session_id = request.headers.get('X-Session-ID', str(uuid.uuid4()))
     
-    # Initialize or get session
-    if session_id not in sessions:
-        sessions[session_id] = {
-            'free_checks': 1,
-            'paid': False,
-            'created_at': datetime.now()
-        }
-
-    # Check access
-    if sessions[session_id]['paid'] or sessions[session_id]['free_checks'] > 0:
+    if session_id in paid_sessions or session_id not in usage_tracker:
         analysis = analyze_website(domain)
-        
-        if not sessions[session_id]['paid']:
-            sessions[session_id]['free_checks'] -= 1
-
-        response = jsonify({
-            "status": "unlocked" if sessions[session_id]['paid'] else "free",
+        usage_tracker[session_id] = True
+        return jsonify({
+            "status": "free" if session_id not in usage_tracker else "unlocked",
             "report": analysis,
-            "remaining_checks": sessions[session_id]['free_checks']
+            "session_id": session_id
         })
-        
-        response.set_cookie(
-            'session_id',
-            value=session_id,
-            max_age=30*24*60*60,
-            httponly=True,
-            samesite='Lax',
-            secure=True
-        )
-        return response
-    
-    return jsonify({
-        "status": "locked",
-        "payment_url": f"{GUMROAD_PRODUCT_URL}?referrer=verifina"
-    })
-
-@app.route('/verify-payment', methods=['GET'])
-def verify_payment():
-    sale_id = request.args.get('sale_id')
-    session_id = request.cookies.get('session_id')
-    
-    if not sale_id or not session_id:
-        return redirect('/?payment=failed')
-    
-    if verify_gumroad_purchase(sale_id) and session_id in sessions:
-        sessions[session_id]['paid'] = True
-        sessions[session_id]['free_checks'] = float('inf')
-        return redirect('/?payment=success')
-    
-    return redirect('/?payment=failed')
+    else:
+        return jsonify({
+            "status": "locked",
+            "payment_url": GUMROAD_PRODUCT_URL
+        })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
+    app.run(host='0.0.0.0', port=5000, debug=True)
