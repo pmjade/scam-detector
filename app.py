@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory 
 from openai import OpenAI
 import os
 import requests
@@ -48,13 +48,11 @@ def get_reddit_sentiment(domain):
 
 def analyze_website(domain):
     """Enhanced website analysis with real-time data"""
-    # Check cache first
     cache_key = domain.lower()
     if cache_key in analysis_cache:
         if datetime.now() < analysis_cache[cache_key]['expires']:
             return analysis_cache[cache_key]['report']
     
-    # Get external data
     reddit_discussions = get_reddit_sentiment(domain)
     
     prompt = f"""
@@ -105,7 +103,6 @@ def analyze_website(domain):
         )
         report = response.choices[0].message.content.strip()
         
-        # Cache results for 6 hours
         analysis_cache[cache_key] = {
             'report': report,
             'expires': datetime.now() + timedelta(hours=6)
@@ -128,20 +125,58 @@ def check_domain():
         return jsonify({"error": "No domain provided"}), 400
 
     session_id = request.headers.get('X-Session-ID', str(uuid.uuid4()))
-    
-    if session_id in paid_sessions or session_id not in usage_tracker:
+
+    if session_id not in usage_tracker:
+        usage_tracker[session_id] = {"free_used": False, "paid": False}
+
+    session_info = usage_tracker[session_id]
+
+    if not session_info["free_used"]:
+        session_info["free_used"] = True
         analysis = analyze_website(domain)
-        usage_tracker[session_id] = True
         return jsonify({
-            "status": "free" if session_id not in usage_tracker else "unlocked",
+            "status": "free",
+            "report": analysis,
+            "session_id": session_id
+        })
+    elif session_info["paid"]:
+        analysis = analyze_website(domain)
+        return jsonify({
+            "status": "unlocked",
             "report": analysis,
             "session_id": session_id
         })
     else:
         return jsonify({
             "status": "locked",
-            "payment_url": GUMROAD_PRODUCT_URL
+            "payment_url": f"{GUMROAD_PRODUCT_URL}?note={session_id}",
+            "message": "First check was free. Unlock more checks for $2."
         })
+
+@app.route('/unlock', methods=['POST'])
+def unlock_session():
+    data = request.get_json()
+    session_id = data.get('session_id')
+    
+    if not session_id:
+        return jsonify({"error": "No session ID provided"}), 400
+    
+    usage_tracker[session_id] = {"free_used": True, "paid": True}
+    return jsonify({"status": "unlocked", "message": "Session unlocked successfully."})
+
+@app.route('/gumroad_webhook', methods=['POST'])
+def gumroad_webhook():
+    form = request.form
+    session_id = form.get('note')
+    sale_id = form.get('sale_id')
+
+    if not session_id or not sale_id:
+        return "Invalid webhook", 400
+
+    usage_tracker[session_id] = {"free_used": True, "paid": True}
+    paid_sessions.add(session_id)
+
+    return "OK", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
