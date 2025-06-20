@@ -6,118 +6,157 @@
   <title>Verifina.pro - Scam Detector</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .premium-badge {
-      background: linear-gradient(90deg, #ffd700, #ff9100);
-      animation: pulse 2s infinite;
+    body {
+      background-image: url('https://images.unsplash.com/photo-1605902711622-cfb43c4437d1?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
+      background-size: cover;
+      background-position: center;
+      font-family: 'Georgia', serif;
+      color: white;
     }
-    @keyframes pulse {
-      0% { opacity: 0.9; }
-      50% { opacity: 1; }
-      100% { opacity: 0.9; }
+    .glass {
+      background-color: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(12px);
+    }
+    .gold-button {
+      background-color: #ffd700;
+      color: black;
+      font-weight: bold;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .gold-button:hover {
+      background-color: #ffec80;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+    }
+    .report-box {
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid #ffd700;
+      border-radius: 8px;
+      padding: 15px;
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 3px solid #ffd700;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
   </style>
 </head>
 
-<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center justify-start pt-10 px-4">
+<body class="text-white flex flex-col min-h-screen justify-between">
 
-  <!-- 🔍 Main Scanner UI -->
-  <h1 class="text-3xl font-bold text-yellow-400 mb-6">🔎 Verifina Scam Detector</h1>
-  
-  <div class="w-full max-w-md">
-    <input id="domainInput" type="text" placeholder="Enter website URL..." class="w-full p-3 rounded text-black mb-4" />
-    <button id="checkBtn" class="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-2 px-4 rounded">
-      Check Website
-    </button>
-    
-    <div id="resultContainer" class="mt-6 bg-gray-800 p-4 rounded hidden">
-      <div id="reportText" class="whitespace-pre-line text-sm"></div>
-      <div id="usageCounter" class="mt-2 text-yellow-300 text-xs"></div>
+  <section class="flex-grow flex flex-col justify-center items-center px-4">
+    <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full text-center">
+      <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Verifina.pro</h1>
+      <p class="text-lg mb-6">Check if any website is a scam - First check FREE!</p>
+
+      <input 
+        type="text" 
+        id="urlInput" 
+        placeholder="https://example.com" 
+        class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-300"
+      >
+      <button 
+        id="checkBtn" 
+        class="gold-button w-full py-3 px-6 rounded-lg text-lg mb-4"
+      >
+        Check Website
+      </button>
+
+      <div id="resultContainer" class="mt-6 hidden">
+        <div id="freeResult" class="hidden">
+          <h2 class="text-xl font-bold mb-2">Your Report</h2>
+          <div id="reportContent" class="report-box text-left mt-4 mb-4 p-4"></div>
+          <p id="usageCounter" class="text-sm text-yellow-300 mb-4"></p>
+        </div>
+        
+        <div id="lockedResult" class="hidden">
+          <div class="bg-red-900 bg-opacity-50 p-4 rounded-lg mb-4">
+            <p class="font-bold">🔒 Report Locked</p>
+            <p>You've used your free check. Unlock unlimited reports for $2!</p>
+          </div>
+          <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
+            <button class="gold-button w-full py-3 px-6 rounded-lg mb-3">
+              Unlock Unlimited Checks - $2
+            </button>
+          </a>
+          <p class="text-sm text-gray-300">After payment, refresh this page</p>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <!-- ✅ Contact Info Footer -->
-  <footer class="mt-10 text-center text-sm text-yellow-200">
+  <footer class="text-center text-sm text-yellow-200 mb-4">
     <p>Need help or want to report an issue?</p>
-    <p>📩 Contact us: 
-      <a href="mailto:verifina.pro@gmail.com" class="underline text-yellow-300">
-        verifina.pro@gmail.com
-      </a>
-    </p>
+    <p>📩 Contact us: <a href="mailto:verifina.pro@gmail.com" class="underline text-yellow-300">verifina.pro@gmail.com</a></p>
   </footer>
 
-  <!-- 🎉 Payment Modal -->
-  <div id="paymentModal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex items-center justify-center z-50">
-    <div class="glass p-8 rounded-xl max-w-md text-center bg-gray-800 border border-yellow-400">
-      <h2 class="text-2xl font-bold text-green-400 mb-4">🎉 Payment Successful!</h2>
-      <p class="mb-6">Your premium access has been activated. Close this message to continue.</p>
-      <button onclick="closePaymentModal()" class="bg-yellow-400 text-black font-bold px-6 py-2 rounded-lg">
-        Continue
-      </button>
-    </div>
-  </div>
-
-  <!-- 🧠 Scripts -->
   <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const params = new URLSearchParams(window.location.search);
-      if (params.has('payment') && params.get('payment') === 'success') {
-        showPaymentModal();
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
-    });
-
-    function showPaymentModal() {
-      document.getElementById('paymentModal').classList.remove('hidden');
-    }
-
-    function closePaymentModal() {
-      document.getElementById('paymentModal').classList.add('hidden');
-      checkAccountStatus();
-    }
-
-    async function checkAccountStatus() {
+    document.getElementById('checkBtn').addEventListener('click', async () => {
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return alert('Please enter a website URL');
+      
+      const checkBtn = document.getElementById('checkBtn');
+      checkBtn.disabled = true;
+      checkBtn.innerHTML = '<span class="spinner"></span> Analyzing...';
+      
       try {
         const response = await fetch('/check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ domain: 'status-check' }),
+          body: JSON.stringify({ domain: url }),
           credentials: 'include'
         });
-
+        
+        if (!response.ok) throw new Error(await response.text());
+        
         const data = await response.json();
-        if (data.status === 'unlocked') {
-          document.getElementById('usageCounter').textContent = "✅ Premium Member";
-          document.getElementById('usageCounter').classList.add('premium-badge', 'px-2', 'py-1', 'rounded-full');
+        const resultContainer = document.getElementById('resultContainer');
+        resultContainer.classList.remove('hidden');
+        
+        if (data.status === 'free') {
+          document.getElementById('freeResult').classList.remove('hidden');
+          document.getElementById('lockedResult').classList.add('hidden');
+          document.getElementById('reportContent').textContent = data.report;
+          document.getElementById('usageCounter').textContent = 
+            "You have 0 free checks remaining. Upgrade for unlimited!";
+        } 
+        else if (data.status === 'unlocked') {
+          document.getElementById('freeResult').classList.remove('hidden');
+          document.getElementById('lockedResult').classList.add('hidden');
+          document.getElementById('reportContent').textContent = data.report;
+          document.getElementById('usageCounter').textContent = 
+            "✅ Unlimited checks (Premium User)";
+        }
+        else {
+          document.getElementById('freeResult').classList.add('hidden');
+          document.getElementById('lockedResult').classList.remove('hidden');
         }
       } catch (error) {
-        console.error('Status check failed:', error);
-      }
-    }
-
-    document.getElementById('checkBtn').addEventListener('click', async () => {
-      const domain = document.getElementById('domainInput').value.trim();
-      if (!domain) return alert("Please enter a domain.");
-
-      const response = await fetch('/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain }),
-        credentials: 'include'
-      });
-
-      const data = await response.json();
-      const resultContainer = document.getElementById('resultContainer');
-      const reportText = document.getElementById('reportText');
-      const usageCounter = document.getElementById('usageCounter');
-
-      if (data.status === 'locked') {
-        window.location.href = data.payment_url;
-      } else {
-        resultContainer.classList.remove('hidden');
-        reportText.textContent = data.report;
-        usageCounter.textContent = `🧾 Remaining checks: ${data.remaining_checks}`;
+        alert('Error: ' + error.message);
+      } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Check Website';
       }
     });
+
+    if (window.location.search.includes('payment_success=true')) {
+      alert('Payment successful! Refresh to activate premium features.');
+    }
   </script>
 </body>
 </html>
