@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body {
-      background-image: url('https://images.unsplash.com/photo-1605902711622-cfb43c4437d1?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
+      background-image: url('https://images.unsplash.com/photo-1521737604893-d14cc237f11d?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
       background-size: cover;
       background-position: center;
       font-family: 'Georgia', serif;
@@ -54,12 +54,24 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+    .premium-badge {
+      background: linear-gradient(90deg, #ffd700, #ff9100);
+      animation: pulse 2s infinite;
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.8; }
+      50% { opacity: 1; }
+      100% { opacity: 0.8; }
+    }
   </style>
 </head>
 
-<body class="text-white flex flex-col min-h-screen justify-between">
-
-  <section class="flex-grow flex flex-col justify-center items-center px-4">
+<body class="text-white">
+  <section class="min-h-screen flex flex-col justify-center items-center px-4">
     <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full text-center">
       <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Verifina.pro</h1>
       <p class="text-lg mb-6">Check if any website is a scam - First check FREE!</p>
@@ -89,23 +101,61 @@
             <p class="font-bold">🔒 Report Locked</p>
             <p>You've used your free check. Unlock unlimited reports for $2!</p>
           </div>
-          <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
-            <button class="gold-button w-full py-3 px-6 rounded-lg mb-3">
-              Unlock Unlimited Checks - $2
-            </button>
-          </a>
-          <p class="text-sm text-gray-300">After payment, refresh this page</p>
+          <button id="unlockBtn" class="gold-button w-full py-3 px-6 rounded-lg mb-3">
+            Unlock Unlimited Checks - $2
+          </button>
+          <p class="text-sm text-gray-300">Instant access after payment</p>
         </div>
       </div>
     </div>
   </section>
 
-  <footer class="text-center text-sm text-yellow-200 mb-4">
-    <p>Need help or want to report an issue?</p>
-    <p>📩 Contact us: <a href="mailto:verifina.pro@gmail.com" class="underline text-yellow-300">verifina.pro@gmail.com</a></p>
-  </footer>
+  <!-- Payment Success Modal -->
+  <div id="successModal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex items-center justify-center z-50">
+    <div class="glass p-8 rounded-xl max-w-md w-full mx-4 text-center">
+      <h2 class="text-2xl font-bold text-green-400 mb-4">🎉 Payment Successful!</h2>
+      <p class="mb-6">Your premium access has been activated. You can now check unlimited websites.</p>
+      <button onclick="closeModal()" class="gold-button px-6 py-2 rounded-lg">
+        Start Checking
+      </button>
+    </div>
+  </div>
 
   <script>
+    // Handle payment flow
+    document.getElementById('unlockBtn')?.addEventListener('click', () => {
+      window.open(
+        'https://akiagi3.gumroad.com/l/bhphh?wanted=true', 
+        '_blank',
+        'noopener noreferrer'
+      );
+      
+      // Check payment status every 3 seconds
+      const paymentCheck = setInterval(async () => {
+        try {
+          const res = await fetch('/verify-payment', { credentials: 'include' });
+          if (res.ok) {
+            clearInterval(paymentCheck);
+            document.getElementById('successModal').classList.remove('hidden');
+          }
+        } catch (e) {
+          console.error('Payment check failed:', e);
+        }
+      }, 3000);
+    });
+
+    function closeModal() {
+      document.getElementById('successModal').classList.add('hidden');
+      location.reload(); // Refresh to activate premium
+    }
+
+    // Check URL for payment success
+    if (new URLSearchParams(window.location.search).has('payment')) {
+      document.getElementById('successModal').classList.remove('hidden');
+      history.replaceState({}, '', '/'); // Clean URL
+    }
+
+    // Existing check functionality
     document.getElementById('checkBtn').addEventListener('click', async () => {
       const url = document.getElementById('urlInput').value.trim();
       if (!url) return alert('Please enter a website URL');
@@ -133,14 +183,16 @@
           document.getElementById('lockedResult').classList.add('hidden');
           document.getElementById('reportContent').textContent = data.report;
           document.getElementById('usageCounter').textContent = 
-            "You have 0 free checks remaining. Upgrade for unlimited!";
+            data.remaining > 0 
+              ? `You have ${data.remaining} free check(s) remaining` 
+              : "You've used your free check";
         } 
         else if (data.status === 'unlocked') {
           document.getElementById('freeResult').classList.remove('hidden');
           document.getElementById('lockedResult').classList.add('hidden');
           document.getElementById('reportContent').textContent = data.report;
-          document.getElementById('usageCounter').textContent = 
-            "✅ Unlimited checks (Premium User)";
+          document.getElementById('usageCounter').innerHTML = 
+            '<span class="premium-badge">✅ PREMIUM MEMBER</span>';
         }
         else {
           document.getElementById('freeResult').classList.add('hidden');
@@ -153,10 +205,6 @@
         checkBtn.textContent = 'Check Website';
       }
     });
-
-    if (window.location.search.includes('payment_success=true')) {
-      alert('Payment successful! Refresh to activate premium features.');
-    }
   </script>
 </body>
 </html>
