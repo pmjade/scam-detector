@@ -4,5 +4,5 @@ requests==2.32.4
 python-dotenv==1.1.0
 flask-cors==6.0.0
 gunicorn==23.0.0
-python-whois
-beautifulsoup4
+beautifulsoup4==4.12.3
+python-whois==0.8.0
