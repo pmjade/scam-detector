@@ -70,65 +70,68 @@
     </div>
   </div>
 
-  <script>
-    document.getElementById('checkForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      const urlInput = document.getElementById('urlInput');
-      const url = urlInput.value.trim();
-      if (!url) return alert('Please enter a domain (like example.com)');
-      
-      const btn = document.getElementById('checkBtn');
-      const spinner = document.getElementById('spinner');
-      const btnText = document.getElementById('btnText');
-      const resultContainer = document.getElementById('resultContainer');
-      const reportContent = document.getElementById('reportContent');
-      const usageCounter = document.getElementById('usageCounter');
+<script>
+  document.getElementById('checkForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const urlInput = document.getElementById('urlInput');
+    const url = urlInput.value.trim();
+    if (!url) return alert('Please enter a domain (like example.com)');
+    
+    const btn = document.getElementById('checkBtn');
+    const spinner = document.getElementById('spinner');
+    const btnText = document.getElementById('btnText');
+    const resultContainer = document.getElementById('resultContainer');
+    const reportContent = document.getElementById('reportContent');
+    const usageCounter = document.getElementById('usageCounter');
 
-      btn.disabled = true;
-      spinner.classList.remove('hidden');
-      btnText.textContent = 'Analyzing...';
+    btn.disabled = true;
+    spinner.classList.remove('hidden');
+    btnText.textContent = 'Analyzing...';
 
-      try {
-        const response = await fetch('/api/check', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ domain: url })
-        });
+    try {
+      const response = await fetch('/api/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ domain: url })
+      });
 
-        const data = await response.json();
-        resultContainer.classList.remove('hidden');
+      const data = await response.json();
+      console.log("🧠 API Response:", data); // DEBUG LINE
 
-        if (data.status === 'locked') {
-          document.getElementById('freeResult').classList.add('hidden');
-          document.getElementById('lockedResult').classList.remove('hidden');
-        } else {
-          document.getElementById('freeResult').classList.remove('hidden');
-          document.getElementById('lockedResult').classList.add('hidden');
+      resultContainer.classList.remove('hidden');
 
-          // Make sure score + level are rendered right
-          const riskScore = data.risk_score ?? "Unknown";
-          const riskLevel = data.risk_level ?? "Undefined";
+      if (data.status === 'locked') {
+        document.getElementById('freeResult').classList.add('hidden');
+        document.getElementById('lockedResult').classList.remove('hidden');
+      } else {
+        document.getElementById('freeResult').classList.remove('hidden');
+        document.getElementById('lockedResult').classList.add('hidden');
 
-          reportContent.textContent = `
+        // Debug fallback
+        const riskScore = data.risk_score !== undefined ? data.risk_score : '❓ (missing)';
+        const riskLevel = data.risk_level !== undefined ? data.risk_level : '❓ (missing)';
+        const fullReport = data.full_report !== undefined ? data.full_report : '❗ full_report missing from backend ❗';
+
+        reportContent.textContent = `
 Risk Score: ${riskScore}% - ${riskLevel}
 
-${data.full_report}
-          `;
+${fullReport}
+        `;
 
-          usageCounter.textContent = data.status === 'unlocked' 
-            ? "✅ Premium member — unlimited scans"
-            : "⚠️ Free Check Used (1 total)";
-        }
-      } catch (error) {
-        alert("Error checking domain: " + error.message);
-      } finally {
-        btn.disabled = false;
-        spinner.classList.add('hidden');
-        btnText.textContent = 'Check Website';
+        usageCounter.textContent = data.status === 'unlocked' 
+          ? "✅ Premium member — unlimited scans"
+          : "⚠️ Free Check Used (1 total)";
       }
-    });
-  </script>
+    } catch (error) {
+      alert("Error checking domain: " + error.message);
+    } finally {
+      btn.disabled = false;
+      spinner.classList.add('hidden');
+      btnText.textContent = 'Check Website';
+    }
+  });
+</script>
 </body>
 </html>
