@@ -13,32 +13,33 @@ import atexit
 load_dotenv()
 
 # Initialize Flask app
-app = Flask(__name__)
+app = Flask(name)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 CORS(app, supports_credentials=True)
 
 # OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# In-memory sessions and analysis cache
+# Sessions and cache
 sessions = {}
 analysis_cache = {}
 
-# Load saved sessions on startup (for resilience)
+# Load saved sessions if available
 try:
     with open("sessions.pkl", "rb") as f:
         sessions.update(pickle.load(f))
 except:
     pass
 
+# Save sessions on exit
 def save_sessions():
     with open("sessions.pkl", "wb") as f:
         pickle.dump(sessions, f)
 
 atexit.register(save_sessions)
 
+# Reddit discussions
 def get_reddit_sentiment(domain):
-    """Fetch recent Reddit discussions about the domain"""
     try:
         url = f"https://www.reddit.com/search.json?q={domain}&sort=new"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -57,28 +58,27 @@ def get_reddit_sentiment(domain):
     except Exception as e:
         return [f"Reddit fetch error: {str(e)}"]
 
+# Main domain analyzer
 def analyze_website(domain):
-    """Enhanced website analysis with real-time data via GPT"""
     cache_key = domain.lower()
-    if cache_key in analysis_cache:
-        if datetime.now() < analysis_cache[cache_key]['expires']:
-            return analysis_cache[cache_key]['report']
+    if cache_key in analysis_cache and datetime.now() < analysis_cache[cache_key]['expires']:
+        return analysis_cache[cache_key]['report']
 
     reddit_discussions = get_reddit_sentiment(domain)
 
     prompt = f"""
 Analyze this website for legitimacy: {domain}
 
-**Recent Reddit Discussions:**
+Recent Reddit Discussions:
 {chr(10).join(reddit_discussions)}
 
-**Required Analysis:**
-1. Verify domain authenticity (.gov.vn, .edu, etc.)
+Required Analysis:
+1. Verify domain authenticity (.gov.vn etc.)
 2. Analyze Reddit sentiment
 3. Check for common scam patterns
 4. Evaluate professional indicators
 
-**Response Format:**
+Response Format:
 
 🚨 SCAM RISK: XX% (or "Confirmed Legitimate")
 
@@ -109,7 +109,7 @@ Analyze this website for legitimacy: {domain}
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2
         )
-        report = response.choices[0].message['content'].strip()
+        report = response.choices[0].message.content.strip()
         analysis_cache[cache_key] = {
             'report': report,
             'expires': datetime.now() + timedelta(hours=6)
@@ -129,37 +129,36 @@ def check_domain():
     if not domain:
         return jsonify({"error": "No domain provided"}), 400
 
-    # Retrieve or create session based on cookie
     session_id = request.cookies.get('session_id', str(uuid.uuid4()))
+
     if session_id not in sessions:
         sessions[session_id] = {
             'free_checks_remaining': 1,
             'paid': False,
             'created_at': datetime.now()
         }
+
     session = sessions[session_id]
 
-    if session['paid']:
-        # Premium users: unlimited checks
+    if session['paid'] or session['free_checks_remaining'] > 0:
+        # If checking status only (to refresh frontend)
+        if domain == 'status-check':
+            return jsonify({"status": "unlocked" if session['paid'] else "free", "report": "Session updated."})
+
         report = analyze_website(domain)
-        status = "unlocked"
-    elif session['free_checks_remaining'] > 0:
-        # Allow one free check
-        report = analyze_website(domain)
-        session['free_checks_remaining'] -= 1
-        status = "free"
+        if not session['paid']:
+            session['free_checks_remaining'] -= 1
+            status = "unlocked" if session['paid'] else "free"
+        response = jsonify({"status": status, "report": report})
+        response.set_cookie('session_id', value=session_id, max_age=30*24*60*60, httponly=True, samesite='Lax')
+        return response
     else:
-        # No free checks left, require payment
         return jsonify({
             "status": "locked",
-            "payment_url": f"https://akiagi3.gumroad.com/l/bhphh?note={session_id}",
-            "message": "Free check used up. Please unlock more checks for $2."
+            "payment_url": "https://akiagi3.gumroad.com/l/bhphh"
         })
 
-    response = jsonify({"status": status, "report": report})
-    response.set_cookie('session_id', value=session_id, max_age=30*24*60*60, httponly=True, samesite='Lax')
-    return response
-
+# ✅ Called by Gumroad redirect after purchase
 @app.route('/verify-payment', methods=['GET'])
 def verify_payment():
     session_id = request.cookies.get('session_id')
@@ -168,6 +167,5 @@ def verify_payment():
         sessions[session_id]['free_checks_remaining'] = float('inf')
     return redirect('/?payment=success')
 
-if __name__ == '__main__':
+if name == 'main':
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
-
