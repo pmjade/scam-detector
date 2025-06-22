@@ -210,24 +210,28 @@ def check_domain():
                 ''', (session_id,))
                 conn.commit()
 
-           # Format response
-risk_score = analysis['probability']
-if risk_score >= 85:
-    level = "💀 BRO THIS IS 100% SCAM"
-elif risk_score >= 65:
-    level = "🔥 HIGH RISK SCAM"
-elif risk_score >= 40:
-    level = "⚠️ SUSPICIOUS"
-else:
-    level = "✅ Likely Legit"
+            # Safely get risk score
+            try:
+                risk_score = analysis['probability']
+            except KeyError:
+                risk_score = 0
 
-response = jsonify({
-    "status": "unlocked" if is_paid else "free",
-    "risk_score": risk_score,  # 🧠 This must be 'risk_score'!
-    "risk_level": level,
-    "full_report": analysis.get('full_report', 'N/A'),
-    "technical_findings": analysis.get('scan_results', {})
-})
+            if risk_score >= 85:
+                level = "💀 BRO THIS IS 100% SCAM"
+            elif risk_score >= 65:
+                level = "🔥 HIGH RISK SCAM"
+            elif risk_score >= 40:
+                level = "⚠️ SUSPICIOUS"
+            else:
+                level = "✅ Likely Legit"
+
+            response = jsonify({
+                "status": "unlocked" if is_paid else "free",
+                "risk_score": risk_score,
+                "risk_level": level,
+                "full_report": analysis.get('full_report', 'N/A'),
+                "technical_findings": analysis.get('scan_results', {})
+            })
             
             response.set_cookie(
                 'session_id',
