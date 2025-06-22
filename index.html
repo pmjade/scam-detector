@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Verifina.pro - Scam Detector</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -28,7 +28,9 @@
     }
   </style>
 </head>
-<body class="text-white min-h-screen flex items-center justify-center p-4">
+<body class="text-white min-h-screen flex flex-col items-center justify-center p-4 relative">
+
+  <!-- Main Box -->
   <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full">
     <h1 class="text-4xl font-bold text-yellow-300 mb-4 text-center">🔍 Verifina.pro</h1>
     <p class="text-lg mb-6 text-center">Check if any website is a scam</p>
@@ -70,68 +72,71 @@
     </div>
   </div>
 
-<script>
-document.getElementById('checkForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const url = document.getElementById('urlInput').value.trim();
-    if (!url) return alert('Enter a website URL');
-    
-    // UI states
-    const btn = document.getElementById('checkBtn');
-    btn.disabled = true;
-    document.getElementById('spinner').classList.remove('hidden');
-    document.getElementById('btnText').textContent = 'Analyzing...';
-    
-    try {
+  <!-- Footer Info -->
+  <div class="mt-8 text-center text-sm text-yellow-200">
+    <p>⚠️ Verifina can make mistakes. Always double-check manually.</p>
+    <p>📩 Contact: <a href="mailto:Verifina.pro@gmail.com" class="underline hover:text-yellow-300">Verifina.pro@gmail.com</a></p>
+  </div>
+
+  <script>
+    document.getElementById('checkForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return alert('Enter a website URL');
+      
+      const btn = document.getElementById('checkBtn');
+      btn.disabled = true;
+      document.getElementById('spinner').classList.remove('hidden');
+      document.getElementById('btnText').textContent = 'Analyzing...';
+      
+      try {
         const response = await fetch('/api/check', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ domain: url })
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ domain: url })
         });
         
         const data = await response.json();
         console.log("API Response:", data);
         
         if (data.error) {
-            alert(`Error: ${data.error}`);
-            return;
+          alert(`Error: ${data.error}`);
+          return;
         }
         
         document.getElementById('resultContainer').classList.remove('hidden');
         
         if (data.status === 'locked') {
-            document.getElementById('freeResult').classList.add('hidden');
-            document.getElementById('lockedResult').classList.remove('hidden');
+          document.getElementById('freeResult').classList.add('hidden');
+          document.getElementById('lockedResult').classList.remove('hidden');
         } else {
-            document.getElementById('freeResult').classList.remove('hidden');
-            document.getElementById('lockedResult').classList.add('hidden');
-            
-            document.getElementById('reportContent').textContent = `
+          document.getElementById('freeResult').classList.remove('hidden');
+          document.getElementById('lockedResult').classList.add('hidden');
+          
+          document.getElementById('reportContent').textContent = `
 Risk Score: ${data.risk_score}% - ${data.risk_level}
 
 ${data.full_report}
-            `;
-            
-            document.getElementById('usageCounter').textContent = 
-                data.status === 'unlocked' 
-                    ? "✅ Premium - Unlimited scans" 
-                    : "⚠️ Free check used (1/1)";
+          `;
+          
+          document.getElementById('usageCounter').textContent = 
+            data.status === 'unlocked' 
+              ? "✅ Premium - Unlimited scans" 
+              : "⚠️ Free check used (1/1)";
         }
-    } catch (error) {
+      } catch (error) {
         alert("Failed to check website. Try again.");
         console.error(error);
-    } finally {
+      } finally {
         btn.disabled = false;
         document.getElementById('spinner').classList.add('hidden');
         document.getElementById('btnText').textContent = 'Check Website';
-    }
-});
-</script>
-  <div class="mt-8 text-center text-sm text-yellow-200">
-    <p>⚠️ Verifina can make mistakes. Always double-check manually.</p>
-    <p>📩 Contact: <a href="mailto:Verifina.pro@gmail.com" class="underline hover:text-yellow-300">Verifina.pro@gmail.com</a></p>
-  </div>
+      }
+    });
+  </script>
+
 </body>
 </html>
+
