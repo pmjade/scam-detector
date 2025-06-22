@@ -43,6 +43,29 @@ def init_db():
 
 init_db()
 
+def check_aa419_database(domain):
+    """Check if domain is listed in AA419 fake sites database"""
+    try:
+        domain_parts = domain.replace('https://', '').replace('http://', '').split('/')[0].split('.')
+        root_domain = '.'.join(domain_parts[-2:]) if len(domain_parts) > 1 else domain
+        
+        response = requests.get(
+            f"https://db.aa419.org/api.php?type=search&value={root_domain}",
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=5
+        )
+        
+        data = response.json()
+        if data.get('count', 0) > 0:
+            return {
+                'listed': True,
+                'entries': data['items'][:3],
+                'source': 'AA419 Database'
+            }
+        return {'listed': False}
+    except Exception as e:
+        return {'error': f"AA419 check failed: {str(e)}"}
+
 def get_risk_level(score):
     if score >= 85: return "💀 BRO THIS IS 100% SCAM"
     elif score >= 65: return "🔥 HIGH RISK SCAM"
@@ -81,32 +104,46 @@ def scan_website(domain):
 def analyze_domain(domain):
     try:
         scan = scan_website(domain)
+        aa419_check = check_aa419_database(domain)
+        
         if 'error' in scan:
             return {'error': scan['error']}
+        
+        aa419_info = ""
+        if aa419_check.get('listed'):
+            aa419_info = "\n🚨 AA419 LISTED SCAM SITE:\n"
+            for entry in aa419_check.get('entries', []):
+                aa419_info += f"- {entry.get('title', 'No title')} (Added: {entry.get('added', 'Unknown')})\n"
 
         prompt = f"""
 Analyze this website for scams: {domain}
-You are an AI trained to detect scam websites.
-Only respond in this exact format, nothing else.
+You MUST check ALL indicators and be extremely thorough.
 
 Technical Indicators:
 - SSL: {'✅' if scan['ssl'] else '❌'}
 - Domain Age: {scan.get('domain_age', 'Unknown')} days
 - Phishing Signs: {sum(scan['phishing'].values())}/{len(scan['phishing'])}
 - Crypto Red Flags: {sum(scan['crypto'].values())}/{len(scan['crypto'])}
+{aa419_info if aa419_info else ""}
 
-Provide analysis in EXACT format:
+Critical Rules:
+1. If AA419 listed, risk MUST be ≥90%
+2. If <30 days old + crypto signs, risk ≥70%
+3. If phishing signs ≥2, risk ≥60%
+
+Response Format (STRICT):
 SCAM_RISK: XX% (0-100)
 VERDICT: [1-2 sentence summary]
 RED_FLAGS:
-- [3 specific issues]
+- [3-5 specific issues]
+AA419_MATCH: {'Yes' if aa419_check.get('listed') else 'No'}
 """
 
         response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=500
+            temperature=0.2,
+            max_tokens=600
         )
         
         report = response.choices[0].message.content
@@ -115,7 +152,8 @@ RED_FLAGS:
         return {
             'risk_score': risk_score,
             'full_report': report,
-            'technical': scan
+            'technical': scan,
+            'aa419_check': aa419_check
         }
     except Exception as e:
         return {'error': f"Analysis failed: {str(e)}"}
@@ -131,7 +169,6 @@ def check_domain():
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
 
-        # Session handling
         cursor.execute('INSERT OR IGNORE INTO sessions VALUES (?, 1, 0, datetime("now"))', (session_id,))
         cursor.execute('SELECT free_checks, is_paid FROM sessions WHERE session_id = ?', (session_id,))
         checks_left, is_paid = cursor.fetchone()
@@ -142,7 +179,6 @@ def check_domain():
                 'payment_url': 'https://akiagi3.gumroad.com/l/bhphh'
             })
 
-        # Domain analysis
         analysis = analyze_domain(domain)
         if 'error' in analysis:
             return jsonify({'error': analysis['error']}), 500
@@ -156,7 +192,8 @@ def check_domain():
             'risk_score': analysis['risk_score'],
             'risk_level': get_risk_level(analysis['risk_score']),
             'full_report': analysis['full_report'],
-            'technical': analysis['technical']
+            'technical': analysis['technical'],
+            'aa419_match': analysis.get('aa419_check', {}).get('listed', False)
         })
         
         response.set_cookie(
@@ -214,4 +251,3 @@ def get_domain_age(domain):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
-
