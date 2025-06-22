@@ -174,7 +174,44 @@ def check_domain():
     finally:
         conn.close()
 
-# ... [keep other routes same] ...
+@app.route('/')
+def serve_index():
+    return send_from_directory('.', 'index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    return send_from_directory('.', path)
+
+@app.route('/api/verify-payment', methods=['POST'])
+def verify_payment():
+    try:
+        session_id = request.cookies.get('session_id')
+        if not session_id:
+            return jsonify({"error": "No session"}), 400
+        
+        conn = sqlite3.connect('scamdb.sqlite')
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE sessions SET 
+            is_paid = 1,
+            free_checks = 999 
+            WHERE session_id = ?
+        ''', (session_id,))
+        conn.commit()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+def get_domain_age(domain):
+    try:
+        w = whois.whois(domain)
+        creation_date = w.creation_date[0] if isinstance(w.creation_date, list) else w.creation_date
+        return (datetime.now() - creation_date).days if creation_date else None
+    except:
+        return None
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
+
