@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="description" content="Verifina.pro - Instantly detect scam websites with one free check. Unlock unlimited scans for $2. Fast, private, and reliable.">
   <title>Verifina.pro - Scam Detector</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -53,20 +54,29 @@
 </head>
 
 <body class="text-white">
+  <noscript>
+    <div class="bg-red-900 p-4 text-white rounded-lg text-center mt-4">
+      This site requires JavaScript to function. Please enable it.
+    </div>
+  </noscript>
+
   <section class="min-h-screen flex flex-col justify-center items-center px-4">
     <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full text-center">
       <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Verifina.pro</h1>
       <p class="text-lg mb-6">Check if any website is a scam - First check FREE, then $2</p>
 
-      <input 
-        type="text" 
-        id="urlInput" 
-        placeholder="https://example.com" 
-        class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400"
-      >
-      <button id="checkBtn" class="gold-button w-full py-3 px-6 rounded-lg text-lg mb-4">
-        Check Website
-      </button>
+      <form id="checkForm" class="w-full">
+        <input 
+          type="text" 
+          id="urlInput" 
+          placeholder="https://example.com" 
+          class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400"
+        >
+        <button type="submit" id="checkBtn" class="gold-button w-full py-3 px-6 rounded-lg text-lg mb-4 flex items-center justify-center">
+          <span id="spinner" class="spinner hidden"></span>
+          <span id="btnLabel">Check Website</span>
+        </button>
+      </form>
 
       <div id="resultContainer" class="mt-6 hidden">
         <div id="freeResult" class="hidden">
@@ -92,13 +102,24 @@
   </section>
 
   <script>
-    document.getElementById('checkBtn').addEventListener('click', async () => {
+    // Restore previous input
+    document.getElementById('urlInput').value = localStorage.getItem('lastURL') || '';
+
+    document.getElementById('checkForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
       const url = document.getElementById('urlInput').value.trim();
       if (!url) return alert('Please enter a website URL');
 
+      localStorage.setItem('lastURL', url);
+
       const checkBtn = document.getElementById('checkBtn');
+      const spinner = document.getElementById('spinner');
+      const btnLabel = document.getElementById('btnLabel');
+
       checkBtn.disabled = true;
-      checkBtn.innerHTML = '<span class="spinner"></span> Analyzing...';
+      spinner.classList.remove('hidden');
+      btnLabel.textContent = 'Analyzing...';
 
       try {
         const response = await fetch('/check', {
@@ -111,7 +132,8 @@
         const data = await response.json();
         const resultContainer = document.getElementById('resultContainer');
         resultContainer.classList.remove('hidden');
-if (data.status === 'free' || data.status === 'unlocked') {
+
+        if (data.status === 'free' || data.status === 'unlocked') {
           document.getElementById('freeResult').classList.remove('hidden');
           document.getElementById('lockedResult').classList.add('hidden');
           document.getElementById('reportContent').textContent = data.report;
@@ -128,19 +150,22 @@ if (data.status === 'free' || data.status === 'unlocked') {
         alert('Error: ' + error.message);
       } finally {
         checkBtn.disabled = false;
-        checkBtn.textContent = 'Check Website';
+        spinner.classList.add('hidden');
+        btnLabel.textContent = 'Check Website';
       }
     });
-const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.has('payment') && urlParams.get('payment') === 'success') {
-    alert('Payment successful! Premium features unlocked.');
-    fetch('/check', {
+
+    // Handle post-payment auto-unlock
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('payment') && urlParams.get('payment') === 'success') {
+      alert('Payment successful! Premium features unlocked.');
+      fetch('/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ domain: 'status-check' })
-    });
-}
+      });
+    }
   </script>
 </body>
 </html>
