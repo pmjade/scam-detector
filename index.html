@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body {
-      background-image: url('https://images.unsplash.com/photo-1521737604893-d14cc237f11d?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
+      background-image: url('https://images.unsplash.com/photo-1521832441830-d9b06f623c08?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
       background-size: cover;
       background-position: center;
       font-family: 'Georgia', serif;
@@ -22,9 +22,12 @@
       color: black;
       font-weight: bold;
       transition: all 0.3s ease;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .gold-button:hover {
       background-color: #ffec80;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
     }
     .report-box {
       background: rgba(0, 0, 0, 0.5);
@@ -44,10 +47,12 @@
       height: 20px;
       animation: spin 1s linear infinite;
       display: inline-block;
+      vertical-align: middle;
       margin-right: 8px;
     }
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
   </style>
 </head>
@@ -56,7 +61,7 @@
   <section class="min-h-screen flex flex-col justify-center items-center px-4">
     <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full text-center">
       <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Verifina.pro</h1>
-      <p class="text-lg mb-6">Check if any website is a scam - First check FREE, then $2</p>
+      <p class="text-lg mb-6">Check if any website is a scam - First check FREE, then $2 per check.</p>
 
       <input 
         type="text" 
@@ -78,18 +83,33 @@
         <div id="lockedResult" class="hidden">
           <div class="bg-red-900 bg-opacity-50 p-4 rounded-lg mb-4">
             <p class="font-bold">🔒 Report Locked</p>
-            <p>You've used your free check. Unlock unlimited reports for just $2!</p>
+            <p>You've used your free check. Unlock additional reports for $2!</p>
           </div>
-          <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
+          <a id="paymentLink" href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
             <button class="gold-button w-full py-3 px-6 rounded-lg mb-3">
               Unlock Unlimited Checks - $2
             </button>
           </a>
-          <p class="text-sm text-gray-300">After payment, refresh the page</p>
+          <p class="text-sm text-gray-300">After payment, refresh this page</p>
         </div>
       </div>
     </div>
   </section>
+
+  <!-- Payment success detection -->
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('payment') && urlParams.get('payment') === 'success') {
+      alert('✅ Payment successful! Premium features unlocked.');
+      // Force a status refresh
+      fetch('/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ domain: 'status-check' })
+      });
+    }
+  </script>
 
   <script>
     document.getElementById('checkBtn').addEventListener('click', async () => {
@@ -116,15 +136,19 @@
           document.getElementById('freeResult').classList.remove('hidden');
           document.getElementById('lockedResult').classList.add('hidden');
           document.getElementById('reportContent').textContent = data.report;
-          document.getElementById('usageCounter').textContent = 
-            data.status === 'free'
-              ? "⚠️ You have used your free check. Upgrade for unlimited access."
-              : "✅ Unlimited access unlocked!";
+          if(data.status === 'free'){
+            document.getElementById('usageCounter').textContent = 
+              "⚠️ Free check used. Unlock additional reports for $2.";
+          } else {
+            document.getElementById('usageCounter').textContent = 
+              "✅ Unlimited checks (Premium User)";
+          }
         } else {
           document.getElementById('freeResult').classList.add('hidden');
           document.getElementById('lockedResult').classList.remove('hidden');
+          // Optionally update payment link with session ID if needed
+          // document.getElementById('paymentLink').href = "https://akiagi3.gumroad.com/l/bhphh?note=" + sessionID;
         }
-
       } catch (error) {
         alert('Error: ' + error.message);
       } finally {
@@ -132,16 +156,6 @@
         checkBtn.textContent = 'Check Website';
       }
     });
-const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.has('payment') && urlParams.get('payment') === 'success') {
-    alert('Payment successful! Premium features unlocked.');
-    fetch('/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ domain: 'status-check' })
-    });
-}
   </script>
 </body>
 </html>
