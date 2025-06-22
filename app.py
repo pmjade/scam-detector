@@ -39,6 +39,13 @@ def init_db():
             last_checked TIMESTAMP
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS licenses (
+            license_key TEXT PRIMARY KEY,
+            is_used INTEGER DEFAULT 0,
+            activated_at TIMESTAMP
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -47,18 +54,13 @@ init_db()
 def detect_character_scams(domain):
     """Detect homograph attacks using Unicode lookalike characters"""
     suspicious_pairs = {
-        'a': 'а',  # Cyrillic 'а'
-        'e': 'е',  # Cyrillic 'е'
-        'o': 'о',  # Cyrillic 'о'
-        'p': 'р',  # Cyrillic 'р'
-        'c': 'с',  # Cyrillic 'с'
-        'y': 'у',  # Cyrillic 'у'
-        'x': 'х',  # Cyrillic 'х'
+        'a': 'а', 'e': 'е', 'o': 'о', 'p': 'р',
+        'c': 'с', 'y': 'у', 'x': 'х', 'k': 'к'
     }
     
     detected = []
     for char in domain:
-        if ord(char) > 127:  # Non-ASCII character
+        if ord(char) > 127:
             normalized = unicodedata.normalize('NFKD', char).encode('ascii', 'ignore').decode()
             if normalized and normalized in suspicious_pairs.values():
                 original = [k for k, v in suspicious_pairs.items() if v == char][0]
@@ -206,12 +208,6 @@ def check_domain():
         cursor.execute('SELECT free_checks, is_paid FROM sessions WHERE session_id = ?', (session_id,))
         checks_left, is_paid = cursor.fetchone()
 
-        if not is_paid and checks_left <= 0:
-            return jsonify({
-                'status': 'locked',
-                'payment_url': 'https://akiagi3.gumroad.com/l/bhphh'
-            })
-
         analysis = analyze_domain(domain)
         if 'error' in analysis:
             return jsonify({'error': analysis['error']}), 500
@@ -245,6 +241,46 @@ def check_domain():
     finally:
         conn.close()
 
+@app.route('/api/verify-license', methods=['POST'])
+def verify_license():
+    conn = None
+    try:
+        data = request.json
+        license_key = data.get('license_key', '').strip().upper()
+        session_id = request.cookies.get('session_id')
+        
+        if not license_key:
+            return jsonify({"error": "License key required"}), 400
+            
+        if not session_id:
+            return jsonify({"error": "Session expired"}), 400
+            
+        conn = sqlite3.connect('scamdb.sqlite')
+        cursor = conn.cursor()
+        
+        # In production: Verify with Gumroad API here
+        # For demo: Accept any key starting with "VF-"
+        if license_key.startswith("VF-") and len(license_key) > 10:
+            cursor.execute('SELECT is_used FROM licenses WHERE license_key = ?', (license_key,))
+            existing = cursor.fetchone()
+            
+            if existing:
+                if existing[0]:
+                    return jsonify({"error": "License already used"}), 400
+            else:
+                cursor.execute('INSERT INTO licenses (license_key, is_used, activated_at) VALUES (?, 1, datetime("now"))', (license_key,))
+            
+            cursor.execute('UPDATE sessions SET is_paid = 1, free_checks = 999 WHERE session_id = ?', (session_id,))
+            conn.commit()
+            return jsonify({"status": "success"})
+            
+        return jsonify({"error": "Invalid license key format"}), 400
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn: conn.close()
+
 @app.route('/')
 def serve_index():
     return send_from_directory('.', 'index.html')
@@ -252,28 +288,6 @@ def serve_index():
 @app.route('/<path:path>')
 def serve_static(path):
     return send_from_directory('.', path)
-
-@app.route('/api/verify-payment', methods=['POST'])
-def verify_payment():
-    try:
-        session_id = request.cookies.get('session_id')
-        if not session_id:
-            return jsonify({"error": "No session"}), 400
-        
-        conn = sqlite3.connect('scamdb.sqlite')
-        cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE sessions SET 
-            is_paid = 1,
-            free_checks = 999 
-            WHERE session_id = ?
-        ''', (session_id,))
-        conn.commit()
-        return jsonify({"status": "success"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
