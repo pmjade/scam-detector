@@ -24,12 +24,32 @@
       animation: spin 1s linear infinite;
     }
     .blurred {
-      filter: blur(5px);
+      filter: blur(8px);
       user-select: none;
       pointer-events: none;
     }
+    .locked {
+      position: relative;
+    }
+    .locked-content {
+      display: none;
+    }
+    .unlocked .locked-content {
+      display: block;
+    }
+    .unlocked .premium-overlay {
+      display: none;
+    }
     @keyframes spin {
       to { transform: rotate(360deg); }
+    }
+    .pulse {
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
     }
   </style>
 </head>
@@ -57,41 +77,46 @@
     </form>
 
     <div id="resultContainer" class="hidden">
-      <div id="freeResult">
+      <div id="freeResult" class="locked">
         <h2 class="text-xl font-bold mb-2">Scam Analysis</h2>
-        <div id="reportContent" class="bg-black bg-opacity-50 p-4 rounded-lg mb-4 whitespace-pre-line"></div>
-        <div id="premiumOverlay" class="hidden relative">
-          <div class="blurred" id="blurredContent"></div>
-          <div class="absolute inset-0 flex items-center justify-center">
-            <div class="bg-black bg-opacity-80 p-6 rounded-lg max-w-md text-center">
-              <h3 class="text-xl font-bold text-yellow-300 mb-2">🔒 Premium Report</h3>
-              <p class="mb-4">Your free check has been used. Unlock this report with a license key:</p>
-              
-              <div class="flex mb-4">
-                <input 
-                  type="text" 
-                  id="licenseKey" 
-                  placeholder="VF-XXXX-XXXX-XXXX" 
-                  class="flex-1 p-2 rounded-l bg-gray-800 text-white"
-                >
-                <button 
-                  id="unlockBtn"
-                  class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-4 rounded-r"
-                >
-                  Unlock
-                </button>
-              </div>
-              
-              <p class="text-sm mb-2">Don't have a key? <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank" class="text-yellow-300 underline">Purchase one here</a></p>
-              <p class="text-xs text-gray-400">Keys are delivered instantly via email</p>
-            </div>
+        <div id="reportContent" class="locked-content bg-black bg-opacity-50 p-4 rounded-lg mb-4 whitespace-pre-line"></div>
+        
+        <div id="premiumOverlay" class="premium-overlay bg-black bg-opacity-80 p-6 rounded-lg text-center">
+          <h3 class="text-xl font-bold text-yellow-300 mb-2">🔒 Premium Report</h3>
+          <p class="mb-4">This report is locked. Unlock with a license key:</p>
+          
+          <div class="flex mb-4">
+            <input 
+              type="text" 
+              id="licenseKey" 
+              placeholder="VF-XXXX-XXXX-XXXX" 
+              class="flex-1 p-2 rounded-l bg-gray-800 text-white"
+            >
+            <button 
+              id="unlockBtn"
+              class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-4 rounded-r"
+            >
+              Unlock
+            </button>
           </div>
+          
+          <a 
+            href="https://akiagi3.gumroad.com/l/bhphh" 
+            target="_blank" 
+            class="block bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-lg mb-2 text-lg pulse"
+          >
+            🚨 GET LICENSE KEY ($2 PER CHECK) 🚨
+          </a>
+          
+          <p class="text-xs text-gray-400">Keys are delivered instantly via email</p>
         </div>
       </div>
     </div>
   </div>
 
   <script>
+    let hasUsedFreeCheck = false;
+    
     document.getElementById('checkForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       
@@ -114,18 +139,19 @@
         const data = await response.json();
         document.getElementById('resultContainer').classList.remove('hidden');
         
-        // Always show full report (blurred if not premium)
-        document.getElementById('reportContent').textContent = `
-Risk Score: ${data.risk_score}% - ${data.risk_level}
-
-${data.full_report}
-        `;
+        // Store the full report in a data attribute
+        document.getElementById('reportContent').textContent = data.full_report;
+        document.getElementById('reportContent').dataset.fullReport = data.full_report;
         
-        if (data.status === 'free') {
-          document.getElementById('premiumOverlay').classList.remove('hidden');
-          document.getElementById('blurredContent').textContent = document.getElementById('reportContent').textContent;
+        if (hasUsedFreeCheck) {
+          // Lock the results after first free check
+          document.getElementById('freeResult').classList.add('locked');
+          document.getElementById('freeResult').classList.remove('unlocked');
         } else {
-          document.getElementById('premiumOverlay').classList.add('hidden');
+          // First check is free
+          document.getElementById('freeResult').classList.remove('locked');
+          document.getElementById('freeResult').classList.add('unlocked');
+          hasUsedFreeCheck = true;
         }
         
       } catch (error) {
@@ -155,8 +181,10 @@ ${data.full_report}
         
         const data = await response.json();
         if (data.status === 'success') {
-          alert('License activated! Refreshing...');
-          window.location.reload();
+          // Unlock the results
+          document.getElementById('freeResult').classList.remove('locked');
+          document.getElementById('freeResult').classList.add('unlocked');
+          document.getElementById('licenseKey').value = '';
         } else {
           alert(data.error || 'Invalid license key');
         }
