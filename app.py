@@ -71,9 +71,12 @@ def get_risk_level(score):
     elif score >= 65: return "🔥 HIGH RISK SCAM"
     elif score >= 40: return "⚠️ SUSPICIOUS"
     return "✅ Likely Legit"
-
+    
 def scan_website(domain):
     try:
+        # Character substitution check
+        char_alerts = detect_character_scams(domain)
+        
         if not domain.startswith(('http://', 'https://')):
             domain = f'https://{domain}'
         
@@ -86,17 +89,41 @@ def scan_website(domain):
         html = response.text
         soup = BeautifulSoup(html, 'html.parser')
 
+        # Common scam patterns
         return {
             'ssl': response.url.startswith('https://'),
             'domain_age': get_domain_age(domain),
-            'phishing': {
-                'fake_login': len(soup.find_all('input', {'type': 'password'})) > 0,
-                'brand_logos': len(soup.find_all('img', {'alt': re.compile('login|sign in|bank|paypal', re.I)})) > 0
+            'scam_types': {
+                'phishing': {
+                    'password_fields': len(soup.find_all('input', {'type': 'password'})) > 0,
+                    'brand_impersonation': len(soup.find_all('img', {'alt': re.compile('login|sign in|bank|paypal|amazon|ebay', re.I)})) > 0
+                },
+                'ecommerce': {
+                    'fake_discounts': bool(re.search(r'90% off|limited stock', html, re.I)),
+                    'no_contact': not bool(re.search(r'contact us|about us', html, re.I))
+                },
+                'investment': {
+                    'get_rich_quick': bool(re.search(r'make \$[0-9,]+ fast|double your money', html, re.I)),
+                    'fake_testimonials': len(soup.find_all(class_=re.compile('testimonial|review', re.I))) > 3
+                },
+                'jobs_visas': {
+                    'upfront_payments': bool(re.search(r'processing fee|visa charge', html, re.I)),
+                    'government_impersonation': bool(re.search(r'immigration|official (website|portal)', html, re.I))
+                },
+                'tech_support': {
+                    'popup_warnings': len(soup.find_all('div', class_=re.compile('alert|warning', re.I))) > 0,
+                    'urgent_help': bool(re.search(r'your device is infected|call now', html, re.I))
+                },
+                'government': {
+                    'fake_seals': len(soup.find_all('img', {'alt': re.compile('seal|emblem|badge', re.I)})) > 0,
+                    'threats': bool(re.search(r'warrant|legal action|pay immediately', html, re.I))
+                },
+                'giveaways': {
+                    'free_offers': bool(re.search(r'free iphone|win [\$£€][0-9,]+', html, re.I)),
+                    'social_sharing': len(soup.find_all(class_=re.compile('share|facebook|twitter', re.I))) > 2
+                }
             },
-            'crypto': {
-                'unrealistic_returns': bool(re.search(r'1000% return|guaranteed profit', html, re.I)),
-                'token_pressure': bool(re.search(r'limited offer|almost sold out', html, re.I))
-            }
+            'unicode_scam': char_alerts if char_alerts else None
         }
     except Exception as e:
         return {'error': str(e)}
@@ -108,42 +135,49 @@ def analyze_domain(domain):
         
         if 'error' in scan:
             return {'error': scan['error']}
-        
-        aa419_info = ""
-        if aa419_check.get('listed'):
-            aa419_info = "\n🚨 AA419 LISTED SCAM SITE:\n"
-            for entry in aa419_check.get('entries', []):
-                aa419_info += f"- {entry.get('title', 'No title')} (Added: {entry.get('added', 'Unknown')})\n"
+
+        # Build scam type summary
+        scam_summary = []
+        for scam_type, indicators in scan['scam_types'].items():
+            triggered = sum(indicators.values())
+            total = len(indicators)
+            scam_summary.append(f"{scam_type.replace('_',' ').title()}: {triggered}/{total}")
 
         prompt = f"""
-Analyze this website for scams: {domain}
-You MUST check ALL indicators and be extremely thorough.
+Analyze this website: {domain}
 
-Technical Indicators:
+SCAM TYPE INDICATORS:
+{" | ".join(scam_summary)}
+
+CRITICAL WARNINGS:
+{" | ".join(scan['unicode_scam']) if scan.get('unicode_scam') else "No character scams detected"}
+
+DOMAIN INFO:
 - SSL: {'✅' if scan['ssl'] else '❌'}
-- Domain Age: {scan.get('domain_age', 'Unknown')} days
-- Phishing Signs: {sum(scan['phishing'].values())}/{len(scan['phishing'])}
-- Crypto Red Flags: {sum(scan['crypto'].values())}/{len(scan['crypto'])}
-{aa419_info if aa419_info else ""}
+- Age: {scan.get('domain_age', 'Unknown')} days
+- AA419 Listed: {'✅' if aa419_check.get('listed') else '❌'}
 
-Critical Rules:
-1. If AA419 listed, risk MUST be ≥90%
-2. If <30 days old + crypto signs, risk ≥70%
-3. If phishing signs ≥2, risk ≥60%
+SCAM DETECTION RULES:
+1. Character substitution → 95%+ risk
+2. AA419 listed → 90%+ risk
+3. Phishing signs ≥2 → 70%+ risk
+4. Investment claims + new domain → 80%+ risk
+5. Tech support popups → 75%+ risk
+6. Government impersonation → 85%+ risk
 
-Response Format (STRICT):
+RESPONSE FORMAT:
 SCAM_RISK: XX% (0-100)
+MAIN_SCAM_TYPE: [Primary category]
 VERDICT: [1-2 sentence summary]
 RED_FLAGS:
 - [3-5 specific issues]
-AA419_MATCH: {'Yes' if aa419_check.get('listed') else 'No'}
 """
 
         response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=600
+            temperature=0.1,
+            max_tokens=700
         )
         
         report = response.choices[0].message.content
@@ -153,7 +187,8 @@ AA419_MATCH: {'Yes' if aa419_check.get('listed') else 'No'}
             'risk_score': risk_score,
             'full_report': report,
             'technical': scan,
-            'aa419_check': aa419_check
+            'aa419_check': aa419_check,
+            'unicode_alerts': scan.get('unicode_scam')
         }
     except Exception as e:
         return {'error': f"Analysis failed: {str(e)}"}
