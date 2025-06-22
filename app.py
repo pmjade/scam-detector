@@ -115,34 +115,112 @@ def analyze_domain(domain):
             for entry in aa419_check.get('entries', []):
                 aa419_info += f"- {entry.get('title', 'No title')} (Added: {entry.get('added', 'Unknown')})\n"
 
+       def detect_character_scams(domain):
+    """Detect homograph attacks using Unicode lookalike characters"""
+    suspicious_pairs = {
+        'a': 'а',  # Cyrillic 'а'
+        'e': 'е',  # Cyrillic 'е'
+        'o': 'о',  # Cyrillic 'о'
+        'p': 'р',  # Cyrillic 'р'
+        'c': 'с',  # Cyrillic 'с'
+        'y': 'у',  # Cyrillic 'у'
+        'x': 'х',  # Cyrillic 'х'
+        'k': 'к',  # Cyrillic 'к'
+        'm': 'м',  # Cyrillic 'м'
+        't': 'т',  # Cyrillic 'т'
+    }
+    
+    detected = []
+    for char in domain:
+        if ord(char) > 127:  # Non-ASCII character
+            normalized = unicodedata.normalize('NFKD', char).encode('ascii', 'ignore').decode()
+            if normalized and normalized in suspicious_pairs.values():
+                original = [k for k, v in suspicious_pairs.items() if v == char][0]
+                detected.append(f"Uses '{char}' (U+{ord(char):04X}) instead of '{original}'")
+    
+    return detected
+
+def scan_website(domain):
+    try:
+        # First check for character substitution
+        char_alerts = detect_character_scams(domain)
+        
+        if not domain.startswith(('http://', 'https://')):
+            domain = f'https://{domain}'
+        
+        response = requests.get(
+            domain,
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=10,
+            allow_redirects=True
+        )
+        html = response.text
+        soup = BeautifulSoup(html, 'html.parser')
+
+        return {
+            'ssl': response.url.startswith('https://'),
+            'domain_age': get_domain_age(domain),
+            'phishing': {
+                'fake_login': len(soup.find_all('input', {'type': 'password'})) > 0,
+                'brand_logos': len(soup.find_all('img', {'alt': re.compile('login|sign in|bank|paypal', re.I)})) > 0
+            },
+            'crypto': {
+                'unrealistic_returns': bool(re.search(r'1000% return|guaranteed profit', html, re.I)),
+                'token_pressure': bool(re.search(r'limited offer|almost sold out', html, re.I))
+            },
+            'unicode_scam': char_alerts if char_alerts else None
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+def analyze_domain(domain):
+    try:
+        scan = scan_website(domain)
+        aa419_check = check_aa419_database(domain)
+        
+        if 'error' in scan:
+            return {'error': scan['error']}
+        
+        # Build warning message
+        warnings = []
+        if scan.get('unicode_scam'):
+            warnings.append("🚨 UNICODE SCAM DETECTED:")
+            warnings.extend(scan['unicode_scam'])
+        
+        if aa419_check.get('listed'):
+            warnings.append("\n🚨 AA419 LISTED SCAM SITE:")
+            for entry in aa419_check.get('entries', []):
+                warnings.append(f"- {entry.get('title', 'No title')} (Added: {entry.get('added', 'Unknown')})")
+
         prompt = f"""
 Analyze this website for scams: {domain}
-You MUST check ALL indicators and be extremely thorough.
+
+CRITICAL WARNINGS:
+{"\n".join(warnings) if warnings else "No critical warnings"}
 
 Technical Indicators:
 - SSL: {'✅' if scan['ssl'] else '❌'}
 - Domain Age: {scan.get('domain_age', 'Unknown')} days
 - Phishing Signs: {sum(scan['phishing'].values())}/{len(scan['phishing'])}
 - Crypto Red Flags: {sum(scan['crypto'].values())}/{len(scan['crypto'])}
-{aa419_info if aa419_info else ""}
 
-Critical Rules:
-1. If AA419 listed, risk MUST be ≥90%
-2. If <30 days old + crypto signs, risk ≥70%
-3. If phishing signs ≥2, risk ≥60%
+RULES:
+1. If Unicode scam detected → RISK ≥95%
+2. If AA419 listed → RISK ≥90%
+3. If <30 days old + crypto → RISK ≥70%
+4. If phishing signs ≥2 → RISK ≥60%
 
 Response Format (STRICT):
 SCAM_RISK: XX% (0-100)
 VERDICT: [1-2 sentence summary]
 RED_FLAGS:
 - [3-5 specific issues]
-AA419_MATCH: {'Yes' if aa419_check.get('listed') else 'No'}
 """
 
         response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
+            temperature=0.1,  # Very low for strict compliance
             max_tokens=600
         )
         
@@ -153,7 +231,8 @@ AA419_MATCH: {'Yes' if aa419_check.get('listed') else 'No'}
             'risk_score': risk_score,
             'full_report': report,
             'technical': scan,
-            'aa419_check': aa419_check
+            'aa419_check': aa419_check,
+            'unicode_alerts': scan.get('unicode_scam')
         }
     except Exception as e:
         return {'error': f"Analysis failed: {str(e)}"}
