@@ -1,220 +1,225 @@
-from flask import Flask, request, jsonify, send_from_directory, make_response, redirect
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from openai import OpenAI
 import os
 import uuid
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
 import requests
-import pickle
-import atexit
+import whois
+from bs4 import BeautifulSoup
+import re
+from datetime import datetime
+from dotenv import load_dotenv
+import sqlite3
 
-# Load environment variables
+# Setup
 load_dotenv()
-
-# Initialize Flask app
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
+app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 CORS(app, supports_credentials=True)
-
-# OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Sessions and cache
-sessions = {}
-analysis_cache = {}
+# DB Setup
+def init_db():
+    conn = sqlite3.connect('scamdb.sqlite')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS checks (
+            domain TEXT PRIMARY KEY,
+            risk_score INTEGER,
+            full_report TEXT,
+            last_checked TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-# Load saved sessions
-try:
-    with open("sessions.pkl", "rb") as f:
-        sessions.update(pickle.load(f))
-except:
-    pass
+init_db()
 
-# Save sessions on exit
-def save_sessions():
-    with open("sessions.pkl", "wb") as f:
-        pickle.dump(sessions, f)
+# ==========================
+# DETECTION MODULES
+# ==========================
 
-atexit.register(save_sessions)
+def detect_phishing(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    return {
+        'fake_login': len(soup.find_all('input', {'type': 'password'})) > 0,
+        'brand_logos': len(soup.find_all('img', {'alt': re.compile('login|sign in|bank|paypal', re.I)})) > 0,
+        'urgency_text': bool(re.search(r'urgent|immediately|action required', html, re.I)),
+        'hidden_redirects': len(soup.find_all('meta', {'http-equiv': 'refresh'})) > 0
+    }
 
-# Fetch Reddit discussions
-def get_reddit_sentiment(domain):
+def detect_celebrity_scams(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    return {
+        'fake_testimonials': len(soup.find_all(class_=re.compile('testimonial|endorsement', re.I))) > 0,
+        'stock_photos': len(soup.find_all('img', {'src': re.compile('stock|shutterstock', re.I)})) > 0,
+        'common_names': bool(re.search(r'elon musk|mr beast|tate|oprah|bezos', html, re.I))
+    }
+
+def detect_crypto_scams(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    return {
+        'unrealistic_returns': bool(re.search(r'1000% return|guaranteed profit', html, re.I)),
+        'fake_team': len(soup.find_all(class_=re.compile('team|advisor', re.I))) > 3,
+        'no_whitepaper': not bool(re.search(r'whitepaper|technical', html, re.I)),
+        'token_pressure': bool(re.search(r'limited offer|almost sold out', html, re.I))
+    }
+
+def get_domain_age(domain):
     try:
-        url = f"https://www.reddit.com/search.json?q={domain}&sort=new"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers)
-        posts = response.json().get("data", {}).get("children", [])
+        w = whois.whois(domain)
+        creation_date = w.creation_date
+        if isinstance(creation_date, list):
+            creation_date = creation_date[0]
+        return (datetime.now() - creation_date).days
+    except:
+        return None
 
-        discussions = []
-        for post in posts[:5]:
-            data = post.get("data", {})
-            title = data.get("title", "")
-            score = data.get("score", 0)
-            subreddit = data.get("subreddit", "")
-            discussions.append(f"r/{subreddit} ({score} upvotes): {title}")
+def scan_website(domain):
+    try:
+        response = requests.get(f"https://{domain}", timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0'
+        })
+        html = response.text
 
-        return discussions if discussions else ["No major Reddit discussions found."]
+        return {
+            'phishing': detect_phishing(html),
+            'celebrity': detect_celebrity_scams(html),
+            'crypto': detect_crypto_scams(html),
+            'ssl': response.url.startswith('https://'),
+            'domain_age': get_domain_age(domain)
+        }
     except Exception as e:
-        return [f"Reddit fetch error: {str(e)}"]
+        return {'error': str(e)}
 
-# Analyze domain
-def analyze_website(domain):
-    cache_key = domain.lower()
-    if cache_key in analysis_cache and datetime.now() < analysis_cache[cache_key]['expires']:
-        return analysis_cache[cache_key]['report']
+def format_scan_results(scan):
+    out = []
 
-    reddit_discussions = get_reddit_sentiment(domain)
+    if any(scan['phishing'].values()):
+        out.append("🕵️ PHISHING SIGNS:")
+        for k, v in scan['phishing'].items():
+            if v: out.append(f"- {k.replace('_', ' ').title()}")
 
-    prompt = f"""
-Analyze this website for legitimacy: {domain}
+    if any(scan['celebrity'].values()):
+        out.append("\n🌟 CELEBRITY SCAM SIGNS:")
+        for k, v in scan['celebrity'].items():
+            if v: out.append(f"- {k.replace('_', ' ').title()}")
 
-Recent Reddit Discussions:
-{chr(10).join(reddit_discussions)}
+    if any(scan['crypto'].values()):
+        out.append("\n₿ CRYPTO SCAM SIGNS:")
+        for k, v in scan['crypto'].items():
+            if v: out.append(f"- {k.replace('_', ' ').title()}")
 
-Required Analysis:
-1. Verify domain authenticity (.gov.vn etc.)
-2. Analyze Reddit sentiment
-3. Check for common scam patterns
-4. Evaluate professional indicators
+    return '\n'.join(out)
 
-Response Format:
+# ==========================
+# AI ANALYSIS
+# ==========================
 
-🚨 SCAM RISK: XX% (or "Confirmed Legitimate")
+def analyze_domain(domain):
+    conn = sqlite3.connect('scamdb.sqlite')
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM checks WHERE domain = ?', (domain,))
+        cached = cursor.fetchone()
+        if cached and (datetime.now() - datetime.strptime(cached[3], '%Y-%m-%d %H:%M:%S')).days < 1:
+            return {
+                'probability': cached[1],
+                'full_report': cached[2],
+                'cached': True
+            }
 
-🔍 Verification:
-- Domain Type: [.gov/.com/etc.]
-- SSL Security: [Yes/No]
-- Known Official: [Yes/No/Uncertain]
+        scan_results = scan_website(domain)
+        if 'error' in scan_results:
+            return {'error': scan_results['error']}
 
-📊 Community Reports:
-{chr(10).join(f"- {d}" for d in reddit_discussions)}
+        prompt = f"""
+WEBSITE ANALYSIS FOR: {domain}
 
-⚠️ Red Flags:
-1.
-2.
-3.
+SSL Secure: {'✅' if scan_results['ssl'] else '❌'}
+Domain Age: {scan_results.get('domain_age', 'Unknown')} days
 
-✅ Trust Indicators:
-1.
-2.
+Phishing: {sum(scan_results['phishing'].values())}/4 triggered
+Celebrity Scam: {sum(scan_results['celebrity'].values())}/3 triggered
+Crypto Scam: {sum(scan_results['crypto'].values())}/4 triggered
 
-💡 Final Recommendation:
-[2-3 sentence verdict]
+Details:
+{format_scan_results(scan_results)}
+
+Return in format:
+SCAM_PROBABILITY: XX%
+RISK_LEVEL: [Low/Medium/High/💀 DEATH SCAM]
+VERDICT: [Brief summary]
+PHISHING_RISK: [Low/Medium/High]
+CELEBRITY_SCAM: [Yes/Suspected/No]
+CRYPTO_RISK: [Low/Medium/High]
+RED_FLAGS:
+- bullet
+- bullet
+- bullet
 """
 
-    try:
-        response = client.chat.completions.create(
+        res = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.2
+            temperature=0.3,
+            max_tokens=600
         )
-        report = response.choices[0].message.content.strip()
-        analysis_cache[cache_key] = {
-            'report': report,
-            'expires': datetime.now() + timedelta(hours=6)
+        report = res.choices[0].message.content.strip()
+        probability = int(re.search(r'SCAM_PROBABILITY: (\d+)%', report).group(1))
+
+        cursor.execute('''
+            INSERT OR REPLACE INTO checks 
+            VALUES (?, ?, ?, datetime('now'))
+        ''', (domain, probability, report))
+        conn.commit()
+
+        return {
+            'probability': probability,
+            'full_report': report,
+            'scan_results': scan_results
         }
-        return report
-    except Exception as e:
-        return f"🚨 ANALYSIS FAILED\nError: {str(e)}"
+    finally:
+        conn.close()
 
-# Home route – set session cookie early
-@app.route('/')
-def home():
-    response = make_response(send_from_directory('.', 'index.html'))
-    session_id = request.cookies.get('session_id')
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        response.set_cookie(
-            'session_id',
-            value=session_id,
-            max_age=30 * 24 * 60 * 60,
-            httponly=True,
-            samesite='Lax'
-        )
-    return response
+# ==========================
+# ROUTES
+# ==========================
 
-# Main check route
 @app.route('/check', methods=['POST'])
 def check_domain():
-    data = request.get_json()
-    domain = data.get('domain', '').strip()
-
+    domain = request.json.get('domain', '').strip()
     if not domain:
         return jsonify({"error": "No domain provided"}), 400
 
-    session_id = request.cookies.get('session_id')
-    if not session_id:
-        session_id = str(uuid.uuid4())
+    session_id = request.cookies.get('session_id', str(uuid.uuid4()))
 
-    if session_id not in sessions:
-        sessions[session_id] = {
-            'free_checks_remaining': 1,
-            'paid': False,
-            'created_at': datetime.now()
-        }
+    result = analyze_domain(domain)
+    if 'error' in result:
+        return jsonify({"error": result['error']}), 500
 
-    session = sessions[session_id]
-
-    if session['paid'] or session['free_checks_remaining'] > 0:
-        if domain == 'status-check':
-            return jsonify({
-                "status": "unlocked" if session['paid'] else "free",
-                "report": "Session updated."
-            })
-
-        report = analyze_website(domain)
-
-        if not session['paid']:
-            session['free_checks_remaining'] -= 1
-
-        status = "unlocked" if session['paid'] else "free"
-        response = jsonify({
-            "status": status,
-            "report": report
-        })
-        response.set_cookie(
-            'session_id',
-            value=session_id,
-            max_age=30 * 24 * 60 * 60,
-            httponly=True,
-            samesite='Lax'
-        )
-        return response
+    risk_score = result['probability']
+    if risk_score >= 80:
+        level = "💀 BRO THIS IS 100% SCAM"
+    elif risk_score >= 60:
+        level = "🔥 HIGH RISK SCAM"
+    elif risk_score >= 30:
+        level = "⚠️ MEDIUM RISK"
     else:
-        return jsonify({
-            "status": "locked",
-            "payment_url": "https://akiagi3.gumroad.com/l/bhphh"
-        })
+        level = "✅ Likely Legit"
 
-# Gumroad redirect
-@app.route('/verify-payment', methods=['GET'])
-def verify_payment():
-    session_id = request.cookies.get('session_id')
-    response = redirect('/?payment=success')
+    response = jsonify({
+        "risk_score": risk_score,
+        "risk_level": level,
+        "full_report": result['full_report'],
+        "technical_findings": result.get('scan_results', {})
+    })
 
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        response.set_cookie(
-            'session_id',
-            value=session_id,
-            max_age=30 * 24 * 60 * 60,
-            httponly=True,
-            samesite='Lax'
-        )
-
-    if session_id not in sessions:
-        sessions[session_id] = {
-            'paid': True,
-            'free_checks_remaining': float('inf'),
-            'created_at': datetime.now()
-        }
-    else:
-        sessions[session_id]['paid'] = True
-        sessions[session_id]['free_checks_remaining'] = float('inf')
-
+    response.set_cookie(
+        'session_id',
+        value=session_id,
+        max_age=30*24*60*60,
+        httponly=True,
+        samesite='Lax'
+    )
     return response
-
-# Run the server
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
