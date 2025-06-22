@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from openai import OpenAI
 import os
@@ -13,12 +13,14 @@ import sqlite3
 
 # Setup
 load_dotenv()
-app = Flask(__name__)
+app = Flask(__name__, static_folder='.')
 app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 CORS(app, supports_credentials=True)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ==========================
 # DB Setup
+# ==========================
 def init_db():
     conn = sqlite3.connect('scamdb.sqlite')
     cursor = conn.cursor()
@@ -38,7 +40,6 @@ init_db()
 # ==========================
 # DETECTION MODULES
 # ==========================
-
 def detect_phishing(html):
     soup = BeautifulSoup(html, 'html.parser')
     return {
@@ -115,7 +116,6 @@ def format_scan_results(scan):
 # ==========================
 # AI ANALYSIS
 # ==========================
-
 def analyze_domain(domain):
     conn = sqlite3.connect('scamdb.sqlite')
     try:
@@ -186,15 +186,23 @@ RED_FLAGS:
 # ROUTES
 # ==========================
 
-@app.route('/check', methods=['POST'])
+@app.route('/')
+def serve_index():
+    return send_from_directory('.', 'index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    return send_from_directory('.', path)
+
+@app.route('/api/check', methods=['POST'])
 def check_domain():
     domain = request.json.get('domain', '').strip()
     if not domain:
         return jsonify({"error": "No domain provided"}), 400
 
     session_id = request.cookies.get('session_id', str(uuid.uuid4()))
-
     result = analyze_domain(domain)
+
     if 'error' in result:
         return jsonify({"error": result['error']}), 500
 
@@ -223,3 +231,7 @@ def check_domain():
         samesite='Lax'
     )
     return response
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
