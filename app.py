@@ -86,6 +86,8 @@ def analyze_domain(domain):
 
         prompt = f"""
 Analyze this website for scams: {domain}
+You are an AI trained to detect scam websites.
+Only respond in this exact format, nothing else.
 
 Technical Indicators:
 - SSL: {'✅' if scan['ssl'] else '❌'}
