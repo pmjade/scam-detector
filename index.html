@@ -1,170 +1,134 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <meta name="description" content="Verifina.pro - Instantly detect scam websites with one free check. Unlock unlimited scans for $2. Fast, private, and reliable.">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Verifina.pro - Scam Detector</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body {
       background-image: url('https://images.unsplash.com/photo-1521737604893-d14cc237f11d?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
       background-size: cover;
-      background-position: center;
       font-family: 'Georgia', serif;
-      color: white;
     }
     .glass {
-      background-color: rgba(0, 0, 0, 0.7);
+      background: rgba(0, 0, 0, 0.7);
       backdrop-filter: blur(12px);
-    }
-    .gold-button {
-      background-color: #ffd700;
-      color: black;
-      font-weight: bold;
-      transition: all 0.3s ease;
-    }
-    .gold-button:hover {
-      background-color: #ffec80;
-    }
-    .report-box {
-      background: rgba(0, 0, 0, 0.5);
-      border: 1px solid #ffd700;
-      border-radius: 8px;
-      padding: 15px;
-      white-space: pre-wrap;
-      font-family: 'Courier New', monospace;
-      max-height: 300px;
-      overflow-y: auto;
     }
     .spinner {
       border: 3px solid rgba(255, 255, 255, 0.3);
-      border-radius: 50%;
       border-top: 3px solid #ffd700;
+      border-radius: 50%;
       width: 20px;
       height: 20px;
       animation: spin 1s linear infinite;
-      display: inline-block;
-      margin-right: 8px;
     }
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
   </style>
 </head>
+<body class="text-white min-h-screen flex items-center justify-center p-4">
+  <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full">
+    <h1 class="text-4xl font-bold text-yellow-300 mb-4 text-center">🔍 Verifina.pro</h1>
+    <p class="text-lg mb-6 text-center">Check if any website is a scam</p>
 
-<body class="text-white">
-  <noscript>
-    <div class="bg-red-900 p-4 text-white rounded-lg text-center mt-4">
-      This site requires JavaScript to function. Please enable it.
-    </div>
-  </noscript>
+    <form id="checkForm" class="mb-6">
+      <input 
+        type="text" 
+        id="urlInput" 
+        placeholder="https://example.com" 
+        class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400"
+        required
+      >
+      <button 
+        type="submit" 
+        id="checkBtn" 
+        class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 px-6 rounded-lg w-full flex items-center justify-center"
+      >
+        <span id="spinner" class="spinner hidden mr-2"></span>
+        <span id="btnText">Check Website</span>
+      </button>
+    </form>
 
-  <section class="min-h-screen flex flex-col justify-center items-center px-4">
-    <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full text-center">
-      <h1 class="text-4xl font-bold text-yellow-300 mb-4">🔍 Verifina.pro</h1>
-      <p class="text-lg mb-6">Check if any website is a scam - First check FREE, then $2</p>
-
-      <form id="checkForm" class="w-full">
-        <input 
-          type="text" 
-          id="urlInput" 
-          placeholder="https://example.com" 
-          class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400"
-        >
-        <button type="submit" id="checkBtn" class="gold-button w-full py-3 px-6 rounded-lg text-lg mb-4 flex items-center justify-center">
-          <span id="spinner" class="spinner hidden"></span>
-          <span id="btnLabel">Check Website</span>
-        </button>
-      </form>
-
-      <div id="resultContainer" class="mt-6 hidden">
-        <div id="freeResult" class="hidden">
-          <h2 class="text-xl font-bold mb-2">Your Report</h2>
-          <div id="reportContent" class="report-box text-left mt-4 mb-4 p-4"></div>
-          <p id="usageCounter" class="text-sm text-yellow-300 mb-4"></p>
-        </div>
-        
-        <div id="lockedResult" class="hidden">
-          <div class="bg-red-900 bg-opacity-50 p-4 rounded-lg mb-4">
-            <p class="font-bold">🔒 Report Locked</p>
-            <p>You've used your free check. Unlock unlimited reports for just $2!</p>
-          </div>
-          <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank">
-            <button class="gold-button w-full py-3 px-6 rounded-lg mb-3">
-              Unlock Unlimited Checks - $2
-            </button>
-          </a>
-          <p class="text-sm text-gray-300">After payment, refresh the page</p>
-        </div>
+    <div id="resultContainer" class="hidden">
+      <div id="freeResult" class="hidden">
+        <h2 class="text-xl font-bold mb-2">Scam Analysis</h2>
+        <div id="reportContent" class="bg-black bg-opacity-50 p-4 rounded-lg mb-4 whitespace-pre-line"></div>
+        <p id="usageCounter" class="text-sm text-yellow-300"></p>
+      </div>
+      
+      <div id="lockedResult" class="hidden bg-red-900 bg-opacity-50 p-4 rounded-lg">
+        <p class="font-bold mb-2">🔒 Free Check Used</p>
+        <p class="mb-4">Unlock unlimited checks for just $2</p>
+        <a href="https://akiagi3.gumroad.com/l/bhphh" target="_blank" class="block">
+          <button class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-4 rounded w-full">
+            Unlock Now
+          </button>
+        </a>
       </div>
     </div>
-  </section>
+  </div>
 
   <script>
-    // Restore previous input
-    document.getElementById('urlInput').value = localStorage.getItem('lastURL') || '';
-
     document.getElementById('checkForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-
+      
       const url = document.getElementById('urlInput').value.trim();
-      if (!url) return alert('Please enter a website URL');
-
-      localStorage.setItem('lastURL', url);
-
-      const checkBtn = document.getElementById('checkBtn');
+      if (!url) return alert('Please enter a URL');
+      
+      const btn = document.getElementById('checkBtn');
       const spinner = document.getElementById('spinner');
-      const btnLabel = document.getElementById('btnLabel');
-
-      checkBtn.disabled = true;
+      const btnText = document.getElementById('btnText');
+      
+      btn.disabled = true;
       spinner.classList.remove('hidden');
-      btnLabel.textContent = 'Analyzing...';
-
+      btnText.textContent = 'Analyzing...';
+      
       try {
-        const response = await fetch('/check', {
+        const response = await fetch('/api/check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ domain: url })
         });
-
+        
         const data = await response.json();
         const resultContainer = document.getElementById('resultContainer');
         resultContainer.classList.remove('hidden');
-
-        if (data.status === 'free' || data.status === 'unlocked') {
-          document.getElementById('freeResult').classList.remove('hidden');
-          document.getElementById('lockedResult').classList.add('hidden');
-          document.getElementById('reportContent').textContent = data.report;
-          document.getElementById('usageCounter').textContent = 
-            data.status === 'free'
-              ? "⚠️ You have used your free check. Upgrade for unlimited access."
-              : "✅ Unlimited access unlocked!";
-        } else {
+        
+        if (data.status === 'locked') {
           document.getElementById('freeResult').classList.add('hidden');
           document.getElementById('lockedResult').classList.remove('hidden');
+        } else {
+          document.getElementById('freeResult').classList.remove('hidden');
+          document.getElementById('lockedResult').classList.add('hidden');
+          
+          document.getElementById('reportContent').textContent = `
+Risk Score: ${data.risk_score}% - ${data.risk_level}
+${data.full_report}
+          `;
+          
+          document.getElementById('usageCounter').textContent = 
+            data.status === 'free' 
+              ? "⚠️ You've used your free check" 
+              : "✅ Premium member";
         }
-
       } catch (error) {
         alert('Error: ' + error.message);
       } finally {
-        checkBtn.disabled = false;
+        btn.disabled = false;
         spinner.classList.add('hidden');
-        btnLabel.textContent = 'Check Website';
+        btnText.textContent = 'Check Website';
       }
     });
-
-    // Handle post-payment auto-unlock
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.has('payment') && urlParams.get('payment') === 'success') {
-      alert('Payment successful! Premium features unlocked.');
-      fetch('/check', {
+    
+    // Handle payment success
+    if (new URLSearchParams(window.location.search).has('payment')) {
+      fetch('/api/verify-payment', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ domain: 'status-check' })
-      });
+        credentials: 'include'
+      }).then(() => alert('Premium unlocked!'));
     }
   </script>
 </body>
