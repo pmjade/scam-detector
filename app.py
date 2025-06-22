@@ -13,7 +13,7 @@ import atexit
 load_dotenv()
 
 # Initialize Flask app
-app = Flask(name)
+app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 CORS(app, supports_credentials=True)
 
@@ -24,7 +24,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 sessions = {}
 analysis_cache = {}
 
-# Load saved sessions if available
+# Load saved sessions
 try:
     with open("sessions.pkl", "rb") as f:
         sessions.update(pickle.load(f))
@@ -38,14 +38,14 @@ def save_sessions():
 
 atexit.register(save_sessions)
 
-# Reddit discussions
+# Fetch Reddit discussions
 def get_reddit_sentiment(domain):
     try:
         url = f"https://www.reddit.com/search.json?q={domain}&sort=new"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         posts = response.json().get("data", {}).get("children", [])
-        
+
         discussions = []
         for post in posts[:5]:
             data = post.get("data", {})
@@ -53,12 +53,12 @@ def get_reddit_sentiment(domain):
             score = data.get("score", 0)
             subreddit = data.get("subreddit", "")
             discussions.append(f"r/{subreddit} ({score} upvotes): {title}")
-        
+
         return discussions if discussions else ["No major Reddit discussions found."]
     except Exception as e:
         return [f"Reddit fetch error: {str(e)}"]
 
-# Main domain analyzer
+# Analyze domain
 def analyze_website(domain):
     cache_key = domain.lower()
     if cache_key in analysis_cache and datetime.now() < analysis_cache[cache_key]['expires']:
@@ -118,18 +118,34 @@ Response Format:
     except Exception as e:
         return f"🚨 ANALYSIS FAILED\nError: {str(e)}"
 
+# Home route – set session cookie early
 @app.route('/')
 def home():
-    return send_from_directory('.', 'index.html')
+    response = make_response(send_from_directory('.', 'index.html'))
+    session_id = request.cookies.get('session_id')
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        response.set_cookie(
+            'session_id',
+            value=session_id,
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            samesite='Lax'
+        )
+    return response
 
+# Main check route
 @app.route('/check', methods=['POST'])
 def check_domain():
     data = request.get_json()
     domain = data.get('domain', '').strip()
+
     if not domain:
         return jsonify({"error": "No domain provided"}), 400
 
-    session_id = request.cookies.get('session_id', str(uuid.uuid4()))
+    session_id = request.cookies.get('session_id')
+    if not session_id:
+        session_id = str(uuid.uuid4())
 
     if session_id not in sessions:
         sessions[session_id] = {
@@ -141,16 +157,29 @@ def check_domain():
     session = sessions[session_id]
 
     if session['paid'] or session['free_checks_remaining'] > 0:
-        # If checking status only (to refresh frontend)
         if domain == 'status-check':
-            return jsonify({"status": "unlocked" if session['paid'] else "free", "report": "Session updated."})
+            return jsonify({
+                "status": "unlocked" if session['paid'] else "free",
+                "report": "Session updated."
+            })
 
         report = analyze_website(domain)
+
         if not session['paid']:
             session['free_checks_remaining'] -= 1
-            status = "unlocked" if session['paid'] else "free"
-        response = jsonify({"status": status, "report": report})
-        response.set_cookie('session_id', value=session_id, max_age=30*24*60*60, httponly=True, samesite='Lax')
+
+        status = "unlocked" if session['paid'] else "free"
+        response = jsonify({
+            "status": status,
+            "report": report
+        })
+        response.set_cookie(
+            'session_id',
+            value=session_id,
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            samesite='Lax'
+        )
         return response
     else:
         return jsonify({
@@ -158,14 +187,34 @@ def check_domain():
             "payment_url": "https://akiagi3.gumroad.com/l/bhphh"
         })
 
-# ✅ Called by Gumroad redirect after purchase
+# Gumroad redirect
 @app.route('/verify-payment', methods=['GET'])
 def verify_payment():
     session_id = request.cookies.get('session_id')
-    if session_id in sessions:
+    response = redirect('/?payment=success')
+
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        response.set_cookie(
+            'session_id',
+            value=session_id,
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            samesite='Lax'
+        )
+
+    if session_id not in sessions:
+        sessions[session_id] = {
+            'paid': True,
+            'free_checks_remaining': float('inf'),
+            'created_at': datetime.now()
+        }
+    else:
         sessions[session_id]['paid'] = True
         sessions[session_id]['free_checks_remaining'] = float('inf')
-    return redirect('/?payment=success')
 
-if name == 'main':
+    return response
+
+# Run the server
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
