@@ -18,12 +18,18 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 CORS(app, supports_credentials=True)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ==========================
-# DB Setup
-# ==========================
+# Database setup
 def init_db():
     conn = sqlite3.connect('scamdb.sqlite')
     cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id TEXT PRIMARY KEY,
+            free_checks INTEGER DEFAULT 1,
+            is_paid INTEGER DEFAULT 0,
+            created_at TIMESTAMP
+        )
+    ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS checks (
             domain TEXT PRIMARY KEY,
@@ -37,9 +43,7 @@ def init_db():
 
 init_db()
 
-# ==========================
-# DETECTION MODULES
-# ==========================
+# Detection modules
 def detect_phishing(html):
     soup = BeautifulSoup(html, 'html.parser')
     return {
@@ -69,18 +73,18 @@ def detect_crypto_scams(html):
 def get_domain_age(domain):
     try:
         w = whois.whois(domain)
-        creation_date = w.creation_date
-        if isinstance(creation_date, list):
-            creation_date = creation_date[0]
-        return (datetime.now() - creation_date).days
+        creation_date = w.creation_date[0] if isinstance(w.creation_date, list) else w.creation_date
+        return (datetime.now() - creation_date).days if creation_date else None
     except:
         return None
 
 def scan_website(domain):
     try:
-        response = requests.get(f"https://{domain}", timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0'
-        })
+        response = requests.get(
+            f"https://{domain}",
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=10
+        )
         html = response.text
 
         return {
@@ -93,33 +97,12 @@ def scan_website(domain):
     except Exception as e:
         return {'error': str(e)}
 
-def format_scan_results(scan):
-    out = []
-
-    if any(scan['phishing'].values()):
-        out.append("🕵️ PHISHING SIGNS:")
-        for k, v in scan['phishing'].items():
-            if v: out.append(f"- {k.replace('_', ' ').title()}")
-
-    if any(scan['celebrity'].values()):
-        out.append("\n🌟 CELEBRITY SCAM SIGNS:")
-        for k, v in scan['celebrity'].items():
-            if v: out.append(f"- {k.replace('_', ' ').title()}")
-
-    if any(scan['crypto'].values()):
-        out.append("\n₿ CRYPTO SCAM SIGNS:")
-        for k, v in scan['crypto'].items():
-            if v: out.append(f"- {k.replace('_', ' ').title()}")
-
-    return '\n'.join(out)
-
-# ==========================
-# AI ANALYSIS
-# ==========================
 def analyze_domain(domain):
     conn = sqlite3.connect('scamdb.sqlite')
     try:
         cursor = conn.cursor()
+        
+        # Check cache
         cursor.execute('SELECT * FROM checks WHERE domain = ?', (domain,))
         cached = cursor.fetchone()
         if cached and (datetime.now() - datetime.strptime(cached[3], '%Y-%m-%d %H:%M:%S')).days < 1:
@@ -133,41 +116,39 @@ def analyze_domain(domain):
         if 'error' in scan_results:
             return {'error': scan_results['error']}
 
+        # Generate AI report
         prompt = f"""
-WEBSITE ANALYSIS FOR: {domain}
+Analyze this website: {domain}
 
-SSL Secure: {'✅' if scan_results['ssl'] else '❌'}
-Domain Age: {scan_results.get('domain_age', 'Unknown')} days
+Technical Scan:
+- SSL: {'✅' if scan_results['ssl'] else '❌'}
+- Age: {scan_results.get('domain_age', 'Unknown')} days
+- Phishing Signs: {sum(scan_results['phishing'].values())}/4
+- Celebrity Scams: {sum(scan_results['celebrity'].values())}/3  
+- Crypto Red Flags: {sum(scan_results['crypto'].values())}/4
 
-Phishing: {sum(scan_results['phishing'].values())}/4 triggered
-Celebrity Scam: {sum(scan_results['celebrity'].values())}/3 triggered
-Crypto Scam: {sum(scan_results['crypto'].values())}/4 triggered
-
-Details:
-{format_scan_results(scan_results)}
-
-Return in format:
-SCAM_PROBABILITY: XX%
+Required Format:
+SCAM_PROBABILITY: XX% (0-100)
 RISK_LEVEL: [Low/Medium/High/💀 DEATH SCAM]
-VERDICT: [Brief summary]
+VERDICT: [1-2 sentence summary]
 PHISHING_RISK: [Low/Medium/High]
 CELEBRITY_SCAM: [Yes/Suspected/No]
 CRYPTO_RISK: [Low/Medium/High]
 RED_FLAGS:
-- bullet
-- bullet
-- bullet
+- [3-5 critical issues]
 """
 
-        res = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=600
         )
-        report = res.choices[0].message.content.strip()
+        
+        report = response.choices[0].message.content.strip()
         probability = int(re.search(r'SCAM_PROBABILITY: (\d+)%', report).group(1))
 
+        # Cache results
         cursor.execute('''
             INSERT OR REPLACE INTO checks 
             VALUES (?, ?, ?, datetime('now'))
@@ -182,10 +163,7 @@ RED_FLAGS:
     finally:
         conn.close()
 
-# ==========================
-# ROUTES
-# ==========================
-
+# Routes
 @app.route('/')
 def serve_index():
     return send_from_directory('.', 'index.html')
@@ -201,37 +179,93 @@ def check_domain():
         return jsonify({"error": "No domain provided"}), 400
 
     session_id = request.cookies.get('session_id', str(uuid.uuid4()))
-    result = analyze_domain(domain)
+    conn = sqlite3.connect('scamdb.sqlite')
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Get or create session
+        cursor.execute('''
+            INSERT OR IGNORE INTO sessions 
+            VALUES (?, 1, 0, datetime('now'))
+        ''', (session_id,))
+        
+        cursor.execute('''
+            SELECT free_checks, is_paid FROM sessions 
+            WHERE session_id = ?
+        ''', (session_id,))
+        free_checks, is_paid = cursor.fetchone()
 
-    if 'error' in result:
-        return jsonify({"error": result['error']}), 500
+        # Check access
+        if is_paid or free_checks > 0:
+            analysis = analyze_domain(domain)
+            if 'error' in analysis:
+                return jsonify({"error": analysis['error']}), 500
+            
+            if not is_paid:
+                cursor.execute('''
+                    UPDATE sessions SET 
+                    free_checks = free_checks - 1 
+                    WHERE session_id = ?
+                ''', (session_id,))
+                conn.commit()
 
-    risk_score = result['probability']
-    if risk_score >= 80:
-        level = "💀 BRO THIS IS 100% SCAM"
-    elif risk_score >= 60:
-        level = "🔥 HIGH RISK SCAM"
-    elif risk_score >= 30:
-        level = "⚠️ MEDIUM RISK"
-    else:
-        level = "✅ Likely Legit"
+            # Format response
+            risk_score = analysis['probability']
+            if risk_score >= 85:
+                level = "💀 BRO THIS IS 100% SCAM"
+            elif risk_score >= 65:
+                level = "🔥 HIGH RISK SCAM"
+            elif risk_score >= 40:
+                level = "⚠️ SUSPICIOUS"
+            else:
+                level = "✅ Likely Legit"
 
-    response = jsonify({
-        "risk_score": risk_score,
-        "risk_level": level,
-        "full_report": result['full_report'],
-        "technical_findings": result.get('scan_results', {})
-    })
+            response = jsonify({
+                "status": "unlocked" if is_paid else "free",
+                "risk_score": risk_score,
+                "risk_level": level,
+                "full_report": analysis['full_report'],
+                "technical_findings": analysis.get('scan_results', {})
+            })
+            
+            response.set_cookie(
+                'session_id',
+                value=session_id,
+                max_age=30*24*60*60,
+                httponly=True,
+                samesite='Lax',
+                secure=True
+            )
+            return response
+        
+        return jsonify({
+            "status": "locked",
+            "payment_url": "https://akiagi3.gumroad.com/l/bhphh"
+        })
+    finally:
+        conn.close()
 
-    response.set_cookie(
-        'session_id',
-        value=session_id,
-        max_age=30*24*60*60,
-        httponly=True,
-        samesite='Lax'
-    )
-    return response
+@app.route('/api/verify-payment', methods=['POST'])
+def verify_payment():
+    session_id = request.cookies.get('session_id')
+    if not session_id:
+        return jsonify({"error": "No session"}), 400
+    
+    conn = sqlite3.connect('scamdb.sqlite')
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE sessions SET 
+            is_paid = 1,
+            free_checks = 999 
+            WHERE session_id = ?
+        ''', (session_id,))
+        conn.commit()
+        return jsonify({"status": "success"})
+    finally:
+        conn.close()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
 
