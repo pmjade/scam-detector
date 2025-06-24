@@ -265,67 +265,6 @@ def verify_license():
     finally:
         if conn: conn.close()
 
-@app.route('/api/verify-license', methods=['POST'])
-def verify_license():
-    conn = None
-    try:
-        data = request.json
-        license_key = data.get('license_key', '').strip().upper()
-        session_id = request.cookies.get('session_id')
-        
-        if not license_key:
-            return jsonify({"error": "License key required"}), 400
-            
-        if not session_id:
-            return jsonify({"error": "Session expired"}), 400
-            
-        conn = sqlite3.connect('scamdb.sqlite')
-        cursor = conn.cursor()
-        
-        # Check if license key is valid (starts with VF- and has correct format)
-        if not (license_key.startswith("VF-") and len(license_key) > 10):
-            return jsonify({"error": "Invalid license key format"}), 400
-            
-        # Check if license exists in database
-        cursor.execute('SELECT checks_purchased, checks_used FROM licenses WHERE license_key = ?', (license_key,))
-        license_data = cursor.fetchone()
-        
-        if not license_data:
-            # New license - add to database with 1 check
-            cursor.execute('''
-                INSERT INTO licenses (license_key, checks_purchased, checks_used, activated_at) 
-                VALUES (?, 1, 0, datetime("now"))
-            ''', (license_key,))
-        else:
-            checks_purchased, checks_used = license_data
-            if checks_used >= checks_purchased:
-                return jsonify({"error": "All checks from this license have been used"}), 400
-        
-        # Update license usage
-        cursor.execute('''
-            UPDATE licenses 
-            SET checks_used = checks_used + 1 
-            WHERE license_key = ?
-        ''', (license_key,))
-        
-        # Add 1 check to user's session
-        cursor.execute('''
-            UPDATE sessions 
-            SET checks_remaining = checks_remaining + 1 
-            WHERE session_id = ?
-        ''', (session_id,))
-        
-        conn.commit()
-        return jsonify({
-            "status": "success",
-            "message": "License activated! You've received 1 additional check."
-        })
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn: conn.close()
-
 @app.route('/')
 def serve_index():
     return send_from_directory('.', 'index.html')
