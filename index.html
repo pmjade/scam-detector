@@ -94,7 +94,7 @@
             <input 
               type="text" 
               id="licenseKey" 
-              placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" 
+              placeholder="VF-XXXXXXXX" 
               class="flex-1 p-2 rounded-l bg-gray-800 text-white"
             >
             <button 
@@ -106,13 +106,12 @@
           </div>
           <p id="licenseMessage" class="text-red-400 mb-2"></p>
           
-          <a 
-            href="https://akiagi3.gumroad.com/l/bhphh" 
-            target="_blank" 
+          <button
+            onclick="initiateCheckout()"
             class="block bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-lg mb-2 text-lg pulse w-full max-w-sm"
           >
             🚨 GET LICENSE KEY ($2 PER CHECK) 🚨
-          </a>
+          </button>
           
           <p class="text-xs text-gray-400">Keys are delivered instantly via email</p>
         </div>
@@ -185,19 +184,12 @@
     });
 
     document.getElementById('unlockBtn').addEventListener('click', async () => {
-      const licenseKeyInput = document.getElementById('licenseKey');
-      const licenseKey = licenseKeyInput.value.trim().toUpperCase();
-      const licenseMessage = document.getElementById('licenseMessage');
-
-      if (!licenseKey) {
-        licenseMessage.textContent = 'Please enter your license key.';
-        return;
-      }
+      const licenseKey = document.getElementById('licenseKey').value.trim().toUpperCase();
+      if (!licenseKey) return alert('Please enter your license key');
       
       const btn = document.getElementById('unlockBtn');
       btn.disabled = true;
       btn.textContent = 'Verifying...';
-      licenseMessage.textContent = ''; // Clear previous messages
       
       try {
         const response = await fetch('/api/verify-license', {
@@ -209,23 +201,44 @@
         
         const data = await response.json();
         if (data.status === 'success') {
-          licenseMessage.textContent = data.message;
-          licenseMessage.style.color = 'lightgreen';
-          // Immediately unlock the report because a check was added
-          updateReportUI(1); // Set to 1 to indicate a check is now available
-          licenseKeyInput.value = ''; // Clear the input field
+          document.getElementById('freeResult').classList.remove('locked');
+          document.getElementById('freeResult').classList.add('unlocked');
+          document.getElementById('licenseKey').value = '';
+          alert("License activated! You can now view the results.");
         } else {
-          licenseMessage.textContent = data.error || 'Invalid license key or unexpected error.';
-          licenseMessage.style.color = 'red';
+          alert(data.error || 'Invalid license key');
         }
       } catch (error) {
-        licenseMessage.textContent = 'Verification failed. Please check your internet connection or try again.';
-        licenseMessage.style.color = 'red';
+        alert('Verification failed. Try again.');
       } finally {
         btn.disabled = false;
         btn.textContent = 'Unlock';
       }
     });
+
+    // Add this new function for checkout
+    async function initiateCheckout() {
+      const response = await fetch('/api/generate-license', {
+        method: 'POST',
+        credentials: 'include'
+      });
+      const { license_key, checkout_url } = await response.json();
+      
+      // Store the key locally (optional)
+      localStorage.setItem('pending_license', license_key);
+      
+      // Redirect to Gumroad
+      window.open(checkout_url, '_blank');
+      
+      // Auto-fill the key when user returns (optional)
+      window.addEventListener('focus', () => {
+        const storedKey = localStorage.getItem('pending_license');
+        if (storedKey) {
+          document.getElementById('licenseKey').value = storedKey;
+          localStorage.removeItem('pending_license');
+        }
+      });
+    }
   </script>
 </body>
 </html>
