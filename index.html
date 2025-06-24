@@ -28,24 +28,18 @@
       user-select: none;
       pointer-events: none;
     }
-    /* Default state for the freeResult div */
-    .locked .locked-content {
-      filter: blur(8px); /* Blur content when locked */
-      user-select: none;
-      pointer-events: none;
+    .locked {
+      position: relative;
     }
-    .locked .premium-overlay {
-        display: block; /* Show overlay when locked */
+    .locked-content {
+      display: none;
     }
     .unlocked .locked-content {
-      filter: none; /* No blur when unlocked */
-      user-select: auto;
-      pointer-events: auto;
+      display: block;
     }
     .unlocked .premium-overlay {
-      display: none; /* Hide overlay when unlocked */
+      display: none;
     }
-
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
@@ -83,18 +77,19 @@
     </form>
 
     <div id="resultContainer" class="hidden">
-      <div id="freeResult" class="locked"> <h2 class="text-xl font-bold mb-2">Scam Analysis</h2>
+      <div id="freeResult" class="locked">
+        <h2 class="text-xl font-bold mb-2">Scam Analysis</h2>
         <div id="reportContent" class="locked-content bg-black bg-opacity-50 p-4 rounded-lg mb-4 whitespace-pre-line"></div>
         
-        <div id="premiumOverlay" class="premium-overlay absolute inset-0 bg-black bg-opacity-80 p-6 rounded-lg text-center flex flex-col justify-center items-center">
+        <div id="premiumOverlay" class="premium-overlay bg-black bg-opacity-80 p-6 rounded-lg text-center">
           <h3 class="text-xl font-bold text-yellow-300 mb-2">🔒 Premium Report</h3>
           <p class="mb-4">This report is locked. Unlock with a license key:</p>
           
-          <div class="flex mb-4 w-full max-w-sm">
+          <div class="flex mb-4">
             <input 
               type="text" 
               id="licenseKey" 
-              placeholder="VF-XXXXXXXX" 
+              placeholder="VF-XXXX-XXXX-XXXX" 
               class="flex-1 p-2 rounded-l bg-gray-800 text-white"
             >
             <button 
@@ -104,14 +99,14 @@
               Unlock
             </button>
           </div>
-          <p id="licenseMessage" class="text-red-400 mb-2"></p>
           
-          <button 
-            id="getLicenseKeyBtn"
-            class="block bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-lg mb-2 text-lg pulse w-full max-w-sm"
+          <a 
+            href="https://akiagi3.gumroad.com/l/bhphh" 
+            target="_blank" 
+            class="block bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-lg mb-2 text-lg pulse"
           >
             🚨 GET LICENSE KEY ($2 PER CHECK) 🚨
-          </button>
+          </a>
           
           <p class="text-xs text-gray-400">Keys are delivered instantly via email</p>
         </div>
@@ -124,18 +119,8 @@
   </div>
 
   <script>
-    // Function to update the UI based on remaining checks
-    function updateReportUI(checksRemaining) {
-      const freeResultDiv = document.getElementById('freeResult');
-      if (checksRemaining > 0) {
-        freeResultDiv.classList.remove('locked');
-        freeResultDiv.classList.add('unlocked');
-      } else {
-        freeResultDiv.classList.add('locked');
-        freeResultDiv.classList.remove('unlocked');
-      }
-    }
-
+    let hasUsedFreeCheck = false;
+    
     document.getElementById('checkForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       
@@ -146,7 +131,6 @@
       btn.disabled = true;
       document.getElementById('spinner').classList.remove('hidden');
       document.getElementById('btnText').textContent = 'Analyzing...';
-      document.getElementById('licenseMessage').textContent = ''; // Clear previous messages
       
       try {
         const response = await fetch('/api/check', {
@@ -159,21 +143,23 @@
         const data = await response.json();
         document.getElementById('resultContainer').classList.remove('hidden');
         
-        if (response.ok) { // Check if the response status is 2xx
-            document.getElementById('reportContent').textContent = data.full_report;
-            updateReportUI(data.checks_remaining);
+        // Store the full report in a data attribute
+        document.getElementById('reportContent').textContent = data.full_report;
+        document.getElementById('reportContent').dataset.fullReport = data.full_report;
+        
+        if (hasUsedFreeCheck) {
+          // Lock the results after first free check
+          document.getElementById('freeResult').classList.add('locked');
+          document.getElementById('freeResult').classList.remove('unlocked');
         } else {
-            document.getElementById('reportContent').textContent = data.error || 'Failed to get report.';
-            updateReportUI(0); // Ensure it's locked if there's an error requiring a license
-            if (data.message) {
-                document.getElementById('licenseMessage').textContent = data.message;
-            }
+          // First check is free
+          document.getElementById('freeResult').classList.remove('locked');
+          document.getElementById('freeResult').classList.add('unlocked');
+          hasUsedFreeCheck = true;
         }
         
       } catch (error) {
         alert('Error: ' + error.message);
-        document.getElementById('reportContent').textContent = 'Error: Could not analyze the domain.';
-        updateReportUI(0); // Lock on network/unhandled error
       } finally {
         btn.disabled = false;
         document.getElementById('spinner').classList.add('hidden');
@@ -182,20 +168,12 @@
     });
 
     document.getElementById('unlockBtn').addEventListener('click', async () => {
-      const licenseKeyInput = document.getElementById('licenseKey');
-      const licenseKey = licenseKeyInput.value.trim().toUpperCase();
-      const licenseMessage = document.getElementById('licenseMessage');
-
-      if (!licenseKey) {
-        licenseMessage.textContent = 'Please enter your license key.';
-        licenseMessage.style.color = 'red';
-        return;
-      }
+      const licenseKey = document.getElementById('licenseKey').value.trim().toUpperCase();
+      if (!licenseKey) return alert('Please enter your license key');
       
       const btn = document.getElementById('unlockBtn');
       btn.disabled = true;
       btn.textContent = 'Verifying...';
-      licenseMessage.textContent = ''; // Clear previous messages
       
       try {
         const response = await fetch('/api/verify-license', {
@@ -206,73 +184,20 @@
         });
         
         const data = await response.json();
-        if (response.ok && data.status === 'success') {
-          licenseMessage.textContent = data.message;
-          licenseMessage.style.color = 'lightgreen';
-          updateReportUI(data.checks_remaining); // Update UI based on new checks_remaining from backend
-          licenseKeyInput.value = ''; // Clear the input field
+        if (data.status === 'success') {
+          // Unlock the results
+          document.getElementById('freeResult').classList.remove('locked');
+          document.getElementById('freeResult').classList.add('unlocked');
+          document.getElementById('licenseKey').value = '';
         } else {
-          licenseMessage.textContent = data.error || 'Invalid license key or unexpected error.';
-          licenseMessage.style.color = 'red';
+          alert(data.error || 'Invalid license key');
         }
       } catch (error) {
-        licenseMessage.textContent = 'Verification failed. Please check your internet connection or try again.';
-        licenseMessage.style.color = 'red';
+        alert('Verification failed. Try again.');
       } finally {
         btn.disabled = false;
         btn.textContent = 'Unlock';
       }
-    });
-
-    // Function to initiate checkout and generate license
-    async function initiateCheckout() {
-        const licenseMessage = document.getElementById('licenseMessage');
-        licenseMessage.textContent = 'Generating license and redirecting...';
-        licenseMessage.style.color = 'white';
-
-        try {
-            const response = await fetch('/api/generate-license', {
-                method: 'POST',
-                credentials: 'include'
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to generate license key.');
-            }
-
-            const { license_key, checkout_url } = await response.json();
-            
-            // Store the key locally for auto-fill on return
-            localStorage.setItem('pending_license', license_key);
-            
-            // Redirect to Gumroad
-            window.open(checkout_url, '_blank');
-            
-            // Auto-fill the key when user returns to this tab/window
-            window.addEventListener('focus', () => {
-                const storedKey = localStorage.getItem('pending_license');
-                if (storedKey) {
-                    document.getElementById('licenseKey').value = storedKey;
-                    // Keep the key in localStorage until it's actually used
-                    // localStorage.removeItem('pending_license'); // Don't remove here, remove only after successful verification
-                }
-            }, { once: true }); // Only trigger this listener once after the tab gains focus
-        } catch (error) {
-            licenseMessage.textContent = `Error initiating checkout: ${error.message}`;
-            licenseMessage.style.color = 'red';
-        }
-    }
-
-    document.getElementById('getLicenseKeyBtn').addEventListener('click', initiateCheckout);
-
-    // Initial check for a pending license key on page load (if user returns from Gumroad)
-    window.addEventListener('load', () => {
-        const storedKey = localStorage.getItem('pending_license');
-        if (storedKey) {
-            document.getElementById('licenseKey').value = storedKey;
-            // The key is cleared from localStorage only AFTER successful verification on the backend
-        }
     });
   </script>
 </body>
