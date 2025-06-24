@@ -209,19 +209,33 @@ def verify_license():
             return jsonify({"error": "Session expired"}), 400
             
         # Verify with Gumroad API
-        gumroad_response = requests.post(
-            "https://api.gumroad.com/v2/licenses/verify",
-            data={
-                "product_permalink": "bhphh",  # Your Gumroad product ID
-                "license_key": license_key
-            },
-            timeout=5
-        )
-        
-        gumroad_data = gumroad_response.json()
+        try:
+            gumroad_response = requests.post(
+                "https://api.gumroad.com/v2/licenses/verify",
+                data={
+                    "product_permalink": "bhphh",  # Your Gumroad product ID
+                    "license_key": license_key
+                },
+                timeout=10,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            )
+            
+            # Check if response is JSON
+            if 'application/json' not in gumroad_response.headers.get('Content-Type', ''):
+                return jsonify({"error": "Gumroad API returned invalid response"}), 500
+                
+            gumroad_data = gumroad_response.json()
+            
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Failed to connect to Gumroad: {str(e)}"}), 500
+        except ValueError:  # Includes JSONDecodeError
+            return jsonify({"error": "Invalid response from Gumroad API"}), 500
         
         if not gumroad_data.get("success"):
-            return jsonify({"error": gumroad_data.get("message", "Invalid license key")}), 400
+            return jsonify({
+                "error": gumroad_data.get("message", "Invalid license key"),
+                "gumroad_response": gumroad_data  # For debugging
+            }), 400
             
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
@@ -230,15 +244,14 @@ def verify_license():
         cursor.execute('SELECT checks_used FROM licenses WHERE license_key = ?', (license_key,))
         existing = cursor.fetchone()
         
-        if existing:
-            if existing[0] >= 1:  # 1 check per key
-                return jsonify({"error": "This license has already been used"}), 400
-        else:
-            # New license
-            cursor.execute('''
-                INSERT INTO licenses (license_key, checks_purchased, activated_at)
-                VALUES (?, 1, datetime("now"))
-            ''', (license_key,))
+        if existing and existing[0] >= 1:
+            return jsonify({"error": "This license has already been used"}), 400
+            
+        # Add or update license
+        cursor.execute('''
+            INSERT OR IGNORE INTO licenses (license_key, checks_purchased, activated_at)
+            VALUES (?, 1, datetime("now"))
+        ''', (license_key,))
         
         # Grant 1 check
         cursor.execute('''
@@ -250,18 +263,19 @@ def verify_license():
         # Mark license as used
         cursor.execute('''
             UPDATE licenses 
-            SET checks_used = 1 
+            SET checks_used = checks_used + 1 
             WHERE license_key = ?
         ''', (license_key,))
         
         conn.commit()
         return jsonify({
             "status": "success",
-            "message": "License activated! +1 check added."
+            "checks_added": 1,
+            "message": "License activated!"
         })
         
     except Exception as e:
-        return jsonify({"error": f"Verification failed: {str(e)}"}), 500
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
     finally:
         if conn: conn.close()
 
