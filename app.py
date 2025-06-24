@@ -194,72 +194,74 @@ RED_FLAGS:
     except Exception as e:
         return {'error': f"Analysis failed: {str(e)}"}
 
-@app.route('/api/check', methods=['POST'])
-def check_domain():
+@app.route('/api/verify-license', methods=['POST'])
+def verify_license():
     conn = None
     try:
-        domain = request.json.get('domain', '').strip()
-        if not domain:
-            return jsonify({'error': 'Domain required'}), 400
-
-        session_id = request.cookies.get('session_id', str(uuid.uuid4()))
+        data = request.json
+        license_key = data.get('license_key', '').strip()
+        session_id = request.cookies.get('session_id')
+        
+        if not license_key:
+            return jsonify({"error": "License key required"}), 400
+            
+        if not session_id:
+            return jsonify({"error": "Session expired"}), 400
+            
+        # Verify with Gumroad API
+        gumroad_response = requests.post(
+            "https://api.gumroad.com/v2/licenses/verify",
+            data={
+                "product_permalink": "bhphh",  # Your Gumroad product ID
+                "license_key": license_key
+            },
+            timeout=5
+        )
+        
+        gumroad_data = gumroad_response.json()
+        
+        if not gumroad_data.get("success"):
+            return jsonify({"error": gumroad_data.get("message", "Invalid license key")}), 400
+            
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
-
-        # Initialize or get session
-        cursor.execute('INSERT OR IGNORE INTO sessions (session_id, checks_remaining, created_at) VALUES (?, 1, datetime("now"))', (session_id,))
-        cursor.execute('SELECT has_used_free_check, checks_remaining FROM sessions WHERE session_id = ?', (session_id,))
-        session_data = cursor.fetchone()
         
-        if not session_data:
-            return jsonify({'error': 'Session error'}), 400
-            
-        has_used_free_check, checks_remaining = session_data
-
-        # Check if user has checks remaining
-        if checks_remaining <= 0:
-            return jsonify({
-                'error': 'No checks remaining',
-                'message': 'Please purchase a license key for additional checks ($2 per check)'
-            }), 402
-
-        analysis = analyze_domain(domain)
-        if 'error' in analysis:
-            return jsonify({'error': analysis['error']}), 500
-
-        # Update checks remaining
-        new_checks = checks_remaining - 1
+        # Check if license already used
+        cursor.execute('SELECT checks_used FROM licenses WHERE license_key = ?', (license_key,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            if existing[0] >= 1:  # 1 check per key
+                return jsonify({"error": "This license has already been used"}), 400
+        else:
+            # New license
+            cursor.execute('''
+                INSERT INTO licenses (license_key, checks_purchased, activated_at)
+                VALUES (?, 1, datetime("now"))
+            ''', (license_key,))
+        
+        # Grant 1 check
         cursor.execute('''
             UPDATE sessions 
-            SET checks_remaining = ?,
-                has_used_free_check = ?
+            SET checks_remaining = checks_remaining + 1 
             WHERE session_id = ?
-        ''', (new_checks, 1 if new_checks == 0 else has_used_free_check, session_id))
+        ''', (session_id,))
+        
+        # Mark license as used
+        cursor.execute('''
+            UPDATE licenses 
+            SET checks_used = 1 
+            WHERE license_key = ?
+        ''', (license_key,))
+        
         conn.commit()
-
-        response = jsonify({
-            'status': 'free' if new_checks > 0 else 'locked',
-            'risk_score': analysis['risk_score'],
-            'risk_level': get_risk_level(analysis['risk_score']),
-            'full_report': analysis['full_report'],
-            'technical': analysis['technical'],
-            'aa419_check': analysis.get('aa419_check', {}).get('listed', False),
-            'unicode_alerts': analysis.get('unicode_alerts'),
-            'checks_remaining': new_checks
+        return jsonify({
+            "status": "success",
+            "message": "License activated! +1 check added."
         })
         
-        response.set_cookie(
-            'session_id',
-            value=session_id,
-            max_age=30*24*60*60,
-            httponly=True,
-            samesite='Lax',
-            secure=True
-        )
-        return response
-
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": f"Verification failed: {str(e)}"}), 500
     finally:
         if conn: conn.close()
 
