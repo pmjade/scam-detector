@@ -175,33 +175,56 @@ def verify_license():
         data = request.get_json(force=True)
         license_key = data.get('license_key', '').strip()
         session_id = request.cookies.get('session_id')
-        if not license_key or not session_id:
-            return jsonify({"error": "License key and session required"}), 400
 
-        gumroad_response = requests.post(
+        if not session_id:
+            return jsonify({"error": "Session not found"}), 400
+
+        conn = sqlite3.connect('scamdb.sqlite')
+        cursor = conn.cursor()
+
+        # Check how many checks they already used
+        cursor.execute('SELECT checks_remaining FROM sessions WHERE session_id = ?', (session_id,))
+        session_row = cursor.fetchone()
+
+        # If they still have free checks, skip license verification
+        if session_row and session_row[0] > 0:
+            return jsonify({
+                "status": "free",
+                "message": "Using free check — no license needed"
+            })
+
+        # If no free checks remain, license is required
+        if not license_key:
+            return jsonify({"error": "License required after first check"}), 402
+
+        # Continue with Gumroad license check...
+        response = requests.post(
             "https://api.gumroad.com/v2/licenses/verify",
             data={
                 "product_permalink": "bhphh",
                 "license_key": license_key
             },
-            timeout=10,
-            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            timeout=10
         )
 
-        if 'application/json' not in gumroad_response.headers.get('Content-Type', ''):
-            return jsonify({"error": "Gumroad API returned HTML instead of JSON"}), 500
+        content_type = response.headers.get('Content-Type', '')
+        if 'application/json' not in content_type:
+            return jsonify({
+                "error": f"Gumroad did not return JSON. Response was:\n{response.text[:500]}"
+            }), 500
 
-        gumroad_data = gumroad_response.json()
+        gumroad_data = response.json()
         if not gumroad_data.get("success"):
             return jsonify({"error": gumroad_data.get("message", "Invalid license key")}), 400
 
-        conn = sqlite3.connect('scamdb.sqlite')
-        cursor = conn.cursor()
+        # License is valid, check usage
         cursor.execute('SELECT checks_used FROM licenses WHERE license_key = ?', (license_key,))
         existing = cursor.fetchone()
         if existing and existing[0] >= 1:
             return jsonify({"error": "This license has already been used"}), 400
 
+        # Update DB
         cursor.execute('''
             INSERT OR IGNORE INTO licenses (license_key, checks_purchased, activated_at)
             VALUES (?, 1, datetime("now"))
@@ -213,12 +236,18 @@ def verify_license():
             UPDATE licenses SET checks_used = checks_used + 1 WHERE license_key = ?
         ''', (license_key,))
         conn.commit()
-        return jsonify({"status": "success", "message": "License activated", "checks_added": 1})
+
+        return jsonify({
+            "status": "success",
+            "message": "License activated",
+            "checks_added": 1
+        })
 
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
 
 @app.route('/')
 def serve_index():
