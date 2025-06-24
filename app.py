@@ -29,25 +29,18 @@ def init_db():
             has_used_free_check INTEGER DEFAULT 0,
             checks_remaining INTEGER DEFAULT 1,
             created_at TIMESTAMP,
-            expected_license_key TEXT
+            expected_license_key TEXT  -- <--- ADDED THIS COLUMN
         )
     ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS checks (
-            domain TEXT PRIMARY KEY,
-            risk_score INTEGER,
-            full_report TEXT,
-            last_checked TIMESTAMP
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS licenses (
-            license_key TEXT PRIMARY KEY,
-            checks_purchased INTEGER DEFAULT 1,
-            checks_used INTEGER DEFAULT 0,
-            activated_at TIMESTAMP
-        )
-    ''')
+    # Removed the 'licenses' table creation as it's not used in this new scheme
+    # cursor.execute('''
+    #     CREATE TABLE IF NOT EXISTS licenses (
+    #         license_key TEXT PRIMARY KEY,
+    #         checks_purchased INTEGER DEFAULT 1,
+    #         checks_used INTEGER DEFAULT 0,
+    #         activated_at TIMESTAMP
+    #     )
+    # ''')
     conn.commit()
     conn.close()
 
@@ -239,14 +232,14 @@ def check_domain():
         conn.commit()
 
         response = jsonify({
-            'status': 'free' if new_checks > 0 else 'locked',
+            'status': 'free' if new_checks > 0 else 'locked', # Status 'locked' means no free checks left for the session
             'risk_score': analysis['risk_score'],
             'risk_level': get_risk_level(analysis['risk_score']),
             'full_report': analysis['full_report'],
             'technical': analysis['technical'],
             'aa419_check': analysis.get('aa419_check', {}).get('listed', False),
             'unicode_alerts': analysis.get('unicode_alerts'),
-            'checks_remaining': new_checks
+            'checks_remaining': new_checks # Send checks_remaining back to client
         })
         
         response.set_cookie(
@@ -264,14 +257,17 @@ def check_domain():
     finally:
         if conn: conn.close()
 
-# Add this new route
+# --- START OF DEEPSEEK CHANGES ---
 @app.route('/api/generate-license', methods=['POST'])
 def generate_license():
     session_id = request.cookies.get('session_id', str(uuid.uuid4()))
-    license_key = f"VF-{uuid.uuid4().hex[:8].upper()}"  # Generate unique key
-    
+    # Ensure the session exists for this ID
     conn = sqlite3.connect('scamdb.sqlite')
     cursor = conn.cursor()
+    cursor.execute('INSERT OR IGNORE INTO sessions (session_id, checks_remaining, created_at) VALUES (?, 1, datetime("now"))', (session_id,))
+    conn.commit() # Commit the session creation if it was new
+
+    license_key = f"VF-{uuid.uuid4().hex[:8].upper()}"  # Generate unique key
     
     # Store the expected license key for this session
     cursor.execute('''
@@ -282,10 +278,21 @@ def generate_license():
     conn.commit()
     conn.close()
     
-    return jsonify({
+    # Set the cookie if it was new session_id
+    response = jsonify({
         "license_key": license_key,
         "checkout_url": f"https://gumroad.com/l/bhphh?license_key={license_key}"
     })
+    response.set_cookie(
+        'session_id',
+        value=session_id,
+        max_age=30*24*60*60,
+        httponly=True,
+        samesite='Lax',
+        secure=True
+    )
+    return response
+
 
 # Modified verify-license endpoint
 @app.route('/api/verify-license', methods=['POST'])
@@ -300,7 +307,7 @@ def verify_license():
             return jsonify({"error": "License key required"}), 400
             
         if not session_id:
-            return jsonify({"error": "Session expired"}), 400
+            return jsonify({"error": "Session expired or invalid. Please check a domain first to start a new session."}), 400
             
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
@@ -312,9 +319,9 @@ def verify_license():
         ''', (session_id, license_key))
         
         if not cursor.fetchone():
-            return jsonify({"error": "Invalid license key for this session"}), 400
+            return jsonify({"error": "Invalid license key for this session. Please ensure you purchased this key from the link we provided."}), 400
         
-        # Grant 1 check
+        # Grant 1 check and clear the expected license key
         cursor.execute('''
             UPDATE sessions 
             SET checks_remaining = checks_remaining + 1,
@@ -325,13 +332,14 @@ def verify_license():
         
         return jsonify({
             "status": "success",
-            "message": "License activated! +1 check added."
+            "message": "License activated! You've received 1 additional check."
         })
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
         if conn: conn.close()
+# --- END OF DEEPSEEK CHANGES ---
 
 @app.route('/')
 def serve_index():
