@@ -6,7 +6,7 @@ import uuid
 import requests
 import whois
 from bs4 import BeautifulSoup
-import re
+import re # <--- Added/Ensured this import for regex
 from datetime import datetime
 from dotenv import load_dotenv
 import sqlite3
@@ -238,14 +238,14 @@ def check_domain():
         conn.commit()
 
         response = jsonify({
-            'status': 'free' if new_checks > 0 else 'locked',
+            'status': 'free' if new_checks > 0 else 'locked', # Status 'locked' means no free checks left for the session
             'risk_score': analysis['risk_score'],
             'risk_level': get_risk_level(analysis['risk_score']),
             'full_report': analysis['full_report'],
             'technical': analysis['technical'],
             'aa419_check': analysis.get('aa419_check', {}).get('listed', False),
             'unicode_alerts': analysis.get('unicode_alerts'),
-            'checks_remaining': new_checks
+            'checks_remaining': new_checks # Send checks_remaining back to client
         })
         
         response.set_cookie(
@@ -275,14 +275,19 @@ def verify_license():
             return jsonify({"error": "License key required"}), 400
             
         if not session_id:
-            return jsonify({"error": "Session expired"}), 400
+            return jsonify({"error": "Session expired or invalid. Please try checking a domain first to start a new session."}), 400
             
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
         
-        # Check if license key is valid (starts with VF- and has correct format)
-        if not (license_key.startswith("VF-") and len(license_key) > 10):
-            return jsonify({"error": "Invalid license key format"}), 400
+        # --- START OF FIX ---
+        # Regex to validate the UUID-like license key format (e.g., AC0EFB01-E3A94619-8EECECB5-CDA0D581)
+        uuid_pattern = re.compile(r'^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$')
+        
+        if not uuid_pattern.match(license_key):
+            # This is the line that was causing the "Invalid license key" error
+            return jsonify({"error": "Invalid license key format. Please ensure it matches the pattern (e.g., XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)."}), 400
+        # --- END OF FIX ---
             
         # Check if license exists in database
         cursor.execute('SELECT checks_purchased, checks_used FROM licenses WHERE license_key = ?', (license_key,))
@@ -290,16 +295,18 @@ def verify_license():
         
         if not license_data:
             # New license - add to database with 1 check
+            # This assumes each unique license key allows for exactly one check.
             cursor.execute('''
                 INSERT INTO licenses (license_key, checks_purchased, checks_used, activated_at) 
                 VALUES (?, 1, 0, datetime("now"))
             ''', (license_key,))
+            # The 'checks_used' will be incremented after this block
         else:
             checks_purchased, checks_used = license_data
             if checks_used >= checks_purchased:
                 return jsonify({"error": "All checks from this license have been used"}), 400
-        
-        # Update license usage
+            
+        # Update license usage (marks this key as used for one check)
         cursor.execute('''
             UPDATE licenses 
             SET checks_used = checks_used + 1 
@@ -320,7 +327,8 @@ def verify_license():
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # A more specific error message for debugging purposes
+        return jsonify({"error": f"An error occurred during license verification: {str(e)}"}), 500
     finally:
         if conn: conn.close()
 
