@@ -6,7 +6,7 @@ import uuid
 import requests
 import whois
 from bs4 import BeautifulSoup
-import re # <--- Added/Ensured this import for regex
+import re
 from datetime import datetime
 from dotenv import load_dotenv
 import sqlite3
@@ -28,7 +28,8 @@ def init_db():
             session_id TEXT PRIMARY KEY,
             has_used_free_check INTEGER DEFAULT 0,
             checks_remaining INTEGER DEFAULT 1,
-            created_at TIMESTAMP
+            created_at TIMESTAMP,
+            expected_license_key TEXT
         )
     ''')
     cursor.execute('''
@@ -238,14 +239,14 @@ def check_domain():
         conn.commit()
 
         response = jsonify({
-            'status': 'free' if new_checks > 0 else 'locked', # Status 'locked' means no free checks left for the session
+            'status': 'free' if new_checks > 0 else 'locked',
             'risk_score': analysis['risk_score'],
             'risk_level': get_risk_level(analysis['risk_score']),
             'full_report': analysis['full_report'],
             'technical': analysis['technical'],
             'aa419_check': analysis.get('aa419_check', {}).get('listed', False),
             'unicode_alerts': analysis.get('unicode_alerts'),
-            'checks_remaining': new_checks # Send checks_remaining back to client
+            'checks_remaining': new_checks
         })
         
         response.set_cookie(
@@ -263,6 +264,30 @@ def check_domain():
     finally:
         if conn: conn.close()
 
+# Add this new route
+@app.route('/api/generate-license', methods=['POST'])
+def generate_license():
+    session_id = request.cookies.get('session_id', str(uuid.uuid4()))
+    license_key = f"VF-{uuid.uuid4().hex[:8].upper()}"  # Generate unique key
+    
+    conn = sqlite3.connect('scamdb.sqlite')
+    cursor = conn.cursor()
+    
+    # Store the expected license key for this session
+    cursor.execute('''
+        UPDATE sessions 
+        SET expected_license_key = ?
+        WHERE session_id = ?
+    ''', (license_key, session_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        "license_key": license_key,
+        "checkout_url": f"https://gumroad.com/l/bhphh?license_key={license_key}"
+    })
+
+# Modified verify-license endpoint
 @app.route('/api/verify-license', methods=['POST'])
 def verify_license():
     conn = None
@@ -275,60 +300,36 @@ def verify_license():
             return jsonify({"error": "License key required"}), 400
             
         if not session_id:
-            return jsonify({"error": "Session expired or invalid. Please try checking a domain first to start a new session."}), 400
+            return jsonify({"error": "Session expired"}), 400
             
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
         
-        # --- START OF FIX ---
-        # Regex to validate the UUID-like license key format (e.g., AC0EFB01-E3A94619-8EECECB5-CDA0D581)
-        uuid_pattern = re.compile(r'^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$')
-        
-        if not uuid_pattern.match(license_key):
-            # This is the line that was causing the "Invalid license key" error
-            return jsonify({"error": "Invalid license key format. Please ensure it matches the pattern (e.g., XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)."}), 400
-        # --- END OF FIX ---
-            
-        # Check if license exists in database
-        cursor.execute('SELECT checks_purchased, checks_used FROM licenses WHERE license_key = ?', (license_key,))
-        license_data = cursor.fetchone()
-        
-        if not license_data:
-            # New license - add to database with 1 check
-            # This assumes each unique license key allows for exactly one check.
-            cursor.execute('''
-                INSERT INTO licenses (license_key, checks_purchased, checks_used, activated_at) 
-                VALUES (?, 1, 0, datetime("now"))
-            ''', (license_key,))
-            # The 'checks_used' will be incremented after this block
-        else:
-            checks_purchased, checks_used = license_data
-            if checks_used >= checks_purchased:
-                return jsonify({"error": "All checks from this license have been used"}), 400
-            
-        # Update license usage (marks this key as used for one check)
+        # Verify key matches what we expected for this session
         cursor.execute('''
-            UPDATE licenses 
-            SET checks_used = checks_used + 1 
-            WHERE license_key = ?
-        ''', (license_key,))
+            SELECT 1 FROM sessions 
+            WHERE session_id = ? AND expected_license_key = ?
+        ''', (session_id, license_key))
         
-        # Add 1 check to user's session
+        if not cursor.fetchone():
+            return jsonify({"error": "Invalid license key for this session"}), 400
+        
+        # Grant 1 check
         cursor.execute('''
             UPDATE sessions 
-            SET checks_remaining = checks_remaining + 1 
+            SET checks_remaining = checks_remaining + 1,
+                expected_license_key = NULL
             WHERE session_id = ?
         ''', (session_id,))
-        
         conn.commit()
+        
         return jsonify({
             "status": "success",
-            "message": "License activated! You've received 1 additional check."
+            "message": "License activated! +1 check added."
         })
         
     except Exception as e:
-        # A more specific error message for debugging purposes
-        return jsonify({"error": f"An error occurred during license verification: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
     finally:
         if conn: conn.close()
 
