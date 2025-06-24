@@ -28,18 +28,24 @@
       user-select: none;
       pointer-events: none;
     }
-    .locked {
-      position: relative;
+    /* Default state for the freeResult div */
+    .locked .locked-content {
+      filter: blur(8px); /* Blur content when locked */
+      user-select: none;
+      pointer-events: none;
     }
-    .locked-content {
-      display: none;
+    .locked .premium-overlay {
+        display: block; /* Show overlay when locked */
     }
     .unlocked .locked-content {
-      display: block;
+      filter: none; /* No blur when unlocked */
+      user-select: auto;
+      pointer-events: auto;
     }
     .unlocked .premium-overlay {
-      display: none;
+      display: none; /* Hide overlay when unlocked */
     }
+
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
@@ -77,19 +83,18 @@
     </form>
 
     <div id="resultContainer" class="hidden">
-      <div id="freeResult" class="locked">
-        <h2 class="text-xl font-bold mb-2">Scam Analysis</h2>
+      <div id="freeResult" class="locked"> <h2 class="text-xl font-bold mb-2">Scam Analysis</h2>
         <div id="reportContent" class="locked-content bg-black bg-opacity-50 p-4 rounded-lg mb-4 whitespace-pre-line"></div>
         
-        <div id="premiumOverlay" class="premium-overlay bg-black bg-opacity-80 p-6 rounded-lg text-center">
+        <div id="premiumOverlay" class="premium-overlay absolute inset-0 bg-black bg-opacity-80 p-6 rounded-lg text-center flex flex-col justify-center items-center">
           <h3 class="text-xl font-bold text-yellow-300 mb-2">🔒 Premium Report</h3>
           <p class="mb-4">This report is locked. Unlock with a license key:</p>
           
-          <div class="flex mb-4">
+          <div class="flex mb-4 w-full max-w-sm">
             <input 
               type="text" 
               id="licenseKey" 
-              placeholder="VF-XXXX-XXXX-XXXX" 
+              placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" 
               class="flex-1 p-2 rounded-l bg-gray-800 text-white"
             >
             <button 
@@ -99,11 +104,12 @@
               Unlock
             </button>
           </div>
+          <p id="licenseMessage" class="text-red-400 mb-2"></p>
           
           <a 
             href="https://akiagi3.gumroad.com/l/bhphh" 
             target="_blank" 
-            class="block bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-lg mb-2 text-lg pulse"
+            class="block bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-lg mb-2 text-lg pulse w-full max-w-sm"
           >
             🚨 GET LICENSE KEY ($2 PER CHECK) 🚨
           </a>
@@ -119,8 +125,18 @@
   </div>
 
   <script>
-    let hasUsedFreeCheck = false;
-    
+    // Function to update the UI based on remaining checks
+    function updateReportUI(checksRemaining) {
+      const freeResultDiv = document.getElementById('freeResult');
+      if (checksRemaining > 0) {
+        freeResultDiv.classList.remove('locked');
+        freeResultDiv.classList.add('unlocked');
+      } else {
+        freeResultDiv.classList.add('locked');
+        freeResultDiv.classList.remove('unlocked');
+      }
+    }
+
     document.getElementById('checkForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       
@@ -131,6 +147,7 @@
       btn.disabled = true;
       document.getElementById('spinner').classList.remove('hidden');
       document.getElementById('btnText').textContent = 'Analyzing...';
+      document.getElementById('licenseMessage').textContent = ''; // Clear previous messages
       
       try {
         const response = await fetch('/api/check', {
@@ -143,23 +160,23 @@
         const data = await response.json();
         document.getElementById('resultContainer').classList.remove('hidden');
         
-        // Store the full report in a data attribute
-        document.getElementById('reportContent').textContent = data.full_report;
-        document.getElementById('reportContent').dataset.fullReport = data.full_report;
-        
-        if (hasUsedFreeCheck) {
-          // Lock the results after first free check
-          document.getElementById('freeResult').classList.add('locked');
-          document.getElementById('freeResult').classList.remove('unlocked');
+        if (response.ok) { // Check if the response status is 2xx
+            document.getElementById('reportContent').textContent = data.full_report;
+            // The 'locked-content' will blur/unblur based on 'freeResult' classes
+            updateReportUI(data.checks_remaining);
         } else {
-          // First check is free
-          document.getElementById('freeResult').classList.remove('locked');
-          document.getElementById('freeResult').classList.add('unlocked');
-          hasUsedFreeCheck = true;
+            // Handle specific errors from the check endpoint, e.g., 'No checks remaining'
+            document.getElementById('reportContent').textContent = data.error || 'Failed to get report.';
+            updateReportUI(0); // Ensure it's locked if there's an error requiring a license
+            if (data.message) {
+                document.getElementById('licenseMessage').textContent = data.message;
+            }
         }
         
       } catch (error) {
         alert('Error: ' + error.message);
+        document.getElementById('reportContent').textContent = 'Error: Could not analyze the domain.';
+        updateReportUI(0); // Lock on network/unhandled error
       } finally {
         btn.disabled = false;
         document.getElementById('spinner').classList.add('hidden');
@@ -168,12 +185,19 @@
     });
 
     document.getElementById('unlockBtn').addEventListener('click', async () => {
-      const licenseKey = document.getElementById('licenseKey').value.trim().toUpperCase();
-      if (!licenseKey) return alert('Please enter your license key');
+      const licenseKeyInput = document.getElementById('licenseKey');
+      const licenseKey = licenseKeyInput.value.trim().toUpperCase();
+      const licenseMessage = document.getElementById('licenseMessage');
+
+      if (!licenseKey) {
+        licenseMessage.textContent = 'Please enter your license key.';
+        return;
+      }
       
       const btn = document.getElementById('unlockBtn');
       btn.disabled = true;
       btn.textContent = 'Verifying...';
+      licenseMessage.textContent = ''; // Clear previous messages
       
       try {
         const response = await fetch('/api/verify-license', {
@@ -185,15 +209,18 @@
         
         const data = await response.json();
         if (data.status === 'success') {
-          // Unlock the results
-          document.getElementById('freeResult').classList.remove('locked');
-          document.getElementById('freeResult').classList.add('unlocked');
-          document.getElementById('licenseKey').value = '';
+          licenseMessage.textContent = data.message;
+          licenseMessage.style.color = 'lightgreen';
+          // Immediately unlock the report because a check was added
+          updateReportUI(1); // Set to 1 to indicate a check is now available
+          licenseKeyInput.value = ''; // Clear the input field
         } else {
-          alert(data.error || 'Invalid license key');
+          licenseMessage.textContent = data.error || 'Invalid license key or unexpected error.';
+          licenseMessage.style.color = 'red';
         }
       } catch (error) {
-        alert('Verification failed. Try again.');
+        licenseMessage.textContent = 'Verification failed. Please check your internet connection or try again.';
+        licenseMessage.style.color = 'red';
       } finally {
         btn.disabled = false;
         btn.textContent = 'Unlock';
