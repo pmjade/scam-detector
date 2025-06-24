@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_cors import CORS
 from openai import OpenAI
 import os
@@ -23,24 +23,16 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 def init_db():
     conn = sqlite3.connect('scamdb.sqlite')
     cursor = conn.cursor()
+    # This table now stores user-specific data including checks_remaining and expected_license_key
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id TEXT PRIMARY KEY,
-            has_used_free_check INTEGER DEFAULT 0,
-            checks_remaining INTEGER DEFAULT 1,
-            created_at TIMESTAMP,
-            expected_license_key TEXT  -- <--- ADDED THIS COLUMN
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            checks_remaining INTEGER DEFAULT 1, -- Each new user gets 1 free check
+            expected_license_key TEXT,         -- For the Deepseek license flow
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    # Removed the 'licenses' table creation as it's not used in this new scheme
-    # cursor.execute('''
-    #     CREATE TABLE IF NOT EXISTS licenses (
-    #         license_key TEXT PRIMARY KEY,
-    #         checks_purchased INTEGER DEFAULT 1,
-    #         checks_used INTEGER DEFAULT 0,
-    #         activated_at TIMESTAMP
-    #     )
-    # ''')
     conn.commit()
     conn.close()
 
@@ -196,43 +188,59 @@ def check_domain():
         if not domain:
             return jsonify({'error': 'Domain required'}), 400
 
-        session_id = request.cookies.get('session_id', str(uuid.uuid4()))
+        user_id = request.cookies.get('user_id')
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
 
-        # Initialize or get session
-        cursor.execute('INSERT OR IGNORE INTO sessions (session_id, checks_remaining, created_at) VALUES (?, 1, datetime("now"))', (session_id,))
-        cursor.execute('SELECT has_used_free_check, checks_remaining FROM sessions WHERE session_id = ?', (session_id,))
-        session_data = cursor.fetchone()
-        
-        if not session_data:
-            return jsonify({'error': 'Session error'}), 400
-            
-        has_used_free_check, checks_remaining = session_data
+        # Get or create user
+        if not user_id:
+            user_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO users (user_id, checks_remaining, created_at, last_activity) 
+                VALUES (?, 1, datetime("now"), datetime("now"))
+            ''', (user_id,))
+            conn.commit()
+            checks_remaining = 1 # New user, so 1 check initially
+        else:
+            cursor.execute('SELECT checks_remaining FROM users WHERE user_id = ?', (user_id,))
+            user_data = cursor.fetchone()
+            if not user_data: # User ID from cookie but not in DB (e.g., DB reset)
+                user_id = str(uuid.uuid4()) # Generate new ID
+                cursor.execute('''
+                    INSERT INTO users (user_id, checks_remaining, created_at, last_activity) 
+                    VALUES (?, 1, datetime("now"), datetime("now"))
+                ''', (user_id,))
+                conn.commit()
+                checks_remaining = 1
+            else:
+                checks_remaining = user_data[0]
 
         # Check if user has checks remaining
         if checks_remaining <= 0:
-            return jsonify({
+            resp = make_response(jsonify({
                 'error': 'No checks remaining',
                 'message': 'Please purchase a license key for additional checks ($2 per check)'
-            }), 402
+            }), 402)
+            resp.set_cookie('user_id', user_id, max_age=365*24*60*60, httponly=True, samesite='Lax', secure=True)
+            return resp
 
         analysis = analyze_domain(domain)
         if 'error' in analysis:
-            return jsonify({'error': analysis['error']}), 500
+            resp = make_response(jsonify({'error': analysis['error']}), 500)
+            resp.set_cookie('user_id', user_id, max_age=365*24*60*60, httponly=True, samesite='Lax', secure=True)
+            return resp
 
-        # Update checks remaining
+        # Update checks remaining for the user
         new_checks = checks_remaining - 1
         cursor.execute('''
-            UPDATE sessions 
-            SET checks_remaining = ?,
-                has_used_free_check = ?
-            WHERE session_id = ?
-        ''', (new_checks, 1 if new_checks == 0 else has_used_free_check, session_id))
+            UPDATE users 
+            SET checks_remaining = ?, last_activity = datetime("now")
+            WHERE user_id = ?
+        ''', (new_checks, user_id))
         conn.commit()
 
-        response = jsonify({
-            'status': 'free' if new_checks > 0 else 'locked', # Status 'locked' means no free checks left for the session
+        resp = make_response(jsonify({
+            'status': 'free' if new_checks > 0 else 'locked',
             'risk_score': analysis['risk_score'],
             'risk_level': get_risk_level(analysis['risk_score']),
             'full_report': analysis['full_report'],
@@ -240,106 +248,140 @@ def check_domain():
             'aa419_check': analysis.get('aa419_check', {}).get('listed', False),
             'unicode_alerts': analysis.get('unicode_alerts'),
             'checks_remaining': new_checks # Send checks_remaining back to client
-        })
+        }))
         
-        response.set_cookie(
-            'session_id',
-            value=session_id,
-            max_age=30*24*60*60,
+        resp.set_cookie(
+            'user_id',
+            value=user_id,
+            max_age=365*24*60*60, # 1 year
             httponly=True,
             samesite='Lax',
             secure=True
         )
-        return response
+        return resp
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f"Error in check_domain: {str(e)}") # Log the error for debugging
+        return jsonify({'error': f"An internal server error occurred: {str(e)}"}), 500
     finally:
         if conn: conn.close()
 
-# --- START OF DEEPSEEK CHANGES ---
 @app.route('/api/generate-license', methods=['POST'])
 def generate_license():
-    session_id = request.cookies.get('session_id', str(uuid.uuid4()))
-    # Ensure the session exists for this ID
-    conn = sqlite3.connect('scamdb.sqlite')
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO sessions (session_id, checks_remaining, created_at) VALUES (?, 1, datetime("now"))', (session_id,))
-    conn.commit() # Commit the session creation if it was new
+    conn = None
+    try:
+        user_id = request.cookies.get('user_id')
+        conn = sqlite3.connect('scamdb.sqlite')
+        cursor = conn.cursor()
 
-    license_key = f"VF-{uuid.uuid4().hex[:8].upper()}"  # Generate unique key
-    
-    # Store the expected license key for this session
-    cursor.execute('''
-        UPDATE sessions 
-        SET expected_license_key = ?
-        WHERE session_id = ?
-    ''', (license_key, session_id))
-    conn.commit()
-    conn.close()
-    
-    # Set the cookie if it was new session_id
-    response = jsonify({
-        "license_key": license_key,
-        "checkout_url": f"https://gumroad.com/l/bhphh?license_key={license_key}"
-    })
-    response.set_cookie(
-        'session_id',
-        value=session_id,
-        max_age=30*24*60*60,
-        httponly=True,
-        samesite='Lax',
-        secure=True
-    )
-    return response
+        # Get or create user
+        if not user_id:
+            user_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO users (user_id, checks_remaining, created_at, last_activity) 
+                VALUES (?, 1, datetime("now"), datetime("now"))
+            ''', (user_id,))
+            conn.commit()
+        else:
+            cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
+            if not cursor.fetchone(): # User ID from cookie but not in DB
+                user_id = str(uuid.uuid4())
+                cursor.execute('''
+                    INSERT INTO users (user_id, checks_remaining, created_at, last_activity) 
+                    VALUES (?, 1, datetime("now"), datetime("now"))
+                ''', (user_id,))
+                conn.commit()
+        
+        license_key = f"VF-{uuid.uuid4().hex[:8].upper()}"  # Generate unique key
+        
+        # Store the expected license key for this user
+        cursor.execute('''
+            UPDATE users 
+            SET expected_license_key = ?, last_activity = datetime("now")
+            WHERE user_id = ?
+        ''', (license_key, user_id))
+        conn.commit()
+        
+        resp = make_response(jsonify({
+            "license_key": license_key,
+            "checkout_url": f"https://akiagi3.gumroad.com/l/bhphh?license_key={license_key}"
+        }))
+        resp.set_cookie(
+            'user_id',
+            value=user_id,
+            max_age=365*24*60*60, # 1 year
+            httponly=True,
+            samesite='Lax',
+            secure=True
+        )
+        return resp
+    except Exception as e:
+        app.logger.error(f"Error in generate_license: {str(e)}")
+        return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500
+    finally:
+        if conn: conn.close()
 
-
-# Modified verify-license endpoint
 @app.route('/api/verify-license', methods=['POST'])
 def verify_license():
     conn = None
     try:
         data = request.json
         license_key = data.get('license_key', '').strip().upper()
-        session_id = request.cookies.get('session_id')
+        user_id = request.cookies.get('user_id')
         
         if not license_key:
             return jsonify({"error": "License key required"}), 400
             
-        if not session_id:
-            return jsonify({"error": "Session expired or invalid. Please check a domain first to start a new session."}), 400
+        if not user_id:
+            # This case should ideally not happen if user_id is properly persisted,
+            # but acts as a fallback/guard.
+            return jsonify({"error": "User session expired or invalid. Please check a domain first."}), 400
             
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
         
-        # Verify key matches what we expected for this session
+        # Verify key matches what we expected for this user, and that it's present
         cursor.execute('''
-            SELECT 1 FROM sessions 
-            WHERE session_id = ? AND expected_license_key = ?
-        ''', (session_id, license_key))
+            SELECT checks_remaining FROM users 
+            WHERE user_id = ? AND expected_license_key = ?
+        ''', (user_id, license_key))
         
-        if not cursor.fetchone():
-            return jsonify({"error": "Invalid license key for this session. Please ensure you purchased this key from the link we provided."}), 400
+        user_data = cursor.fetchone()
         
-        # Grant 1 check and clear the expected license key
+        if not user_data:
+            return jsonify({"error": "Invalid license key for this user. Please ensure you purchased this key from the link we provided and it's the correct one."}), 400
+        
+        # Increment checks_remaining for the user and clear the expected_license_key
+        # The Deepseek prompt implies 1 check is granted per successful verification
+        new_checks_remaining = user_data[0] + 1 
         cursor.execute('''
-            UPDATE sessions 
-            SET checks_remaining = checks_remaining + 1,
-                expected_license_key = NULL
-            WHERE session_id = ?
-        ''', (session_id,))
+            UPDATE users 
+            SET checks_remaining = ?,
+                expected_license_key = NULL,
+                last_activity = datetime("now")
+            WHERE user_id = ?
+        ''', (new_checks_remaining, user_id,))
         conn.commit()
         
-        return jsonify({
+        resp = make_response(jsonify({
             "status": "success",
-            "message": "License activated! You've received 1 additional check."
-        })
+            "message": f"License activated! You've received 1 additional check. You now have {new_checks_remaining} checks."
+        }))
+        resp.set_cookie(
+            'user_id',
+            value=user_id,
+            max_age=365*24*60*60, # 1 year
+            httponly=True,
+            samesite='Lax',
+            secure=True
+        )
+        return resp
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        app.logger.error(f"Error in verify_license: {str(e)}")
+        return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500
     finally:
         if conn: conn.close()
-# --- END OF DEEPSEEK CHANGES ---
 
 @app.route('/')
 def serve_index():
