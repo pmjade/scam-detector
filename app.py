@@ -331,6 +331,36 @@ def serve_index():
 @app.route('/<path:path>')
 def serve_static(path):
     return send_from_directory('.', path)
+@app.route('/gumroad_webhook', methods=['POST'])
+def gumroad_webhook():
+    try:
+        payload = request.form.to_dict()
+        email = payload.get('email')
+        license_key = payload.get('license_key', '').strip().upper()
+
+        if not license_key or not license_key.startswith('VF-'):
+            return jsonify({'error': 'Invalid or missing license key'}), 400
+
+        conn = sqlite3.connect('scamdb.sqlite')
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM licenses WHERE license_key = ?', (license_key,))
+        if cursor.fetchone():
+            return jsonify({'error': 'License already exists'}), 400
+
+        cursor.execute('''
+            INSERT INTO licenses (license_key, checks_purchased, checks_used, activated_at)
+            VALUES (?, 1, 0, datetime("now"))
+        ''', (license_key,))
+        conn.commit()
+        conn.close()
+
+        print(f"✅ License from Gumroad: {license_key} | {email}")
+        return jsonify({'status': 'ok'})
+
+    except Exception as e:
+        print(f"❌ Webhook Error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
