@@ -19,18 +19,10 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 CORS(app, supports_credentials=True)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Database setup
+# Optional: Initialize DB if you still want to keep caching or logs
 def init_db():
     conn = sqlite3.connect('scamdb.sqlite')
     cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id TEXT PRIMARY KEY,
-            has_used_free_check INTEGER DEFAULT 0,
-            checks_remaining INTEGER DEFAULT 1,
-            created_at TIMESTAMP
-        )
-    ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS checks (
             domain TEXT PRIMARY KEY,
@@ -39,26 +31,16 @@ def init_db():
             last_checked TIMESTAMP
         )
     ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS licenses (
-            license_key TEXT PRIMARY KEY,
-            checks_purchased INTEGER DEFAULT 1,
-            checks_used INTEGER DEFAULT 0,
-            activated_at TIMESTAMP
-        )
-    ''')
     conn.commit()
     conn.close()
 
 init_db()
 
 def detect_character_scams(domain):
-    """Detect homograph attacks using Unicode lookalike characters"""
     suspicious_pairs = {
         'a': 'а', 'e': 'е', 'o': 'о', 'p': 'р',
         'c': 'с', 'y': 'у', 'x': 'х', 'k': 'к'
     }
-    
     detected = []
     for char in domain:
         if ord(char) > 127:
@@ -69,17 +51,15 @@ def detect_character_scams(domain):
     return detected
 
 def check_aa419_database(domain):
-    """Check if domain is listed in AA419 fake sites database"""
     try:
         domain_parts = domain.replace('https://', '').replace('http://', '').split('/')[0].split('.')
         root_domain = '.'.join(domain_parts[-2:]) if len(domain_parts) > 1 else domain
-        
+
         response = requests.get(
             f"https://db.aa419.org/api.php?type=search&value={root_domain}",
             headers={'User-Agent': 'Mozilla/5.0'},
             timeout=5
         )
-        
         data = response.json()
         if data.get('count', 0) > 0:
             return {
@@ -108,10 +88,9 @@ def get_domain_age(domain):
 def scan_website(domain):
     try:
         char_alerts = detect_character_scams(domain)
-        
         if not domain.startswith(('http://', 'https://')):
             domain = f'https://{domain}'
-        
+
         response = requests.get(
             domain,
             headers={'User-Agent': 'Mozilla/5.0'},
@@ -141,10 +120,10 @@ def analyze_domain(domain):
     try:
         scan = scan_website(domain)
         aa419_check = check_aa419_database(domain)
-        
+
         if 'error' in scan:
             return {'error': scan['error']}
-        
+
         aa419_info = ""
         if aa419_check.get('listed'):
             aa419_info = "\n🚨 AA419 LISTED SCAM SITE:\n"
@@ -180,10 +159,10 @@ RED_FLAGS:
             temperature=0.2,
             max_tokens=600
         )
-        
+
         report = response.choices[0].message.content
         risk_score = int(re.search(r'SCAM_RISK: (\d+)%', report).group(1))
-        
+
         return {
             'risk_score': risk_score,
             'full_report': report,
@@ -196,182 +175,26 @@ RED_FLAGS:
 
 @app.route('/api/check', methods=['POST'])
 def check_domain():
-    conn = None
     try:
         domain = request.json.get('domain', '').strip()
         if not domain:
             return jsonify({'error': 'Domain required'}), 400
 
-        session_id = request.cookies.get('session_id', str(uuid.uuid4()))
-        conn = sqlite3.connect('scamdb.sqlite')
-        cursor = conn.cursor()
-
-        # Initialize or get session
-        cursor.execute('INSERT OR IGNORE INTO sessions (session_id, checks_remaining, created_at) VALUES (?, 1, datetime("now"))', (session_id,))
-        cursor.execute('SELECT has_used_free_check, checks_remaining FROM sessions WHERE session_id = ?', (session_id,))
-        session_data = cursor.fetchone()
-        
-        if not session_data:
-            return jsonify({'error': 'Session error'}), 400
-            
-        has_used_free_check, checks_remaining = session_data
-
-        # Check if user has checks remaining
-        if checks_remaining <= 0:
-            return jsonify({
-                'error': 'No checks remaining',
-                'message': 'Please purchase a license key for additional checks ($2 per check)'
-            }), 402
-
         analysis = analyze_domain(domain)
         if 'error' in analysis:
             return jsonify({'error': analysis['error']}), 500
 
-        # Update checks remaining
-        new_checks = checks_remaining - 1
-        cursor.execute('''
-            UPDATE sessions 
-            SET checks_remaining = ?,
-                has_used_free_check = ?
-            WHERE session_id = ?
-        ''', (new_checks, 1 if new_checks == 0 else has_used_free_check, session_id))
-        conn.commit()
-
         response = jsonify({
-            'status': 'free' if new_checks > 0 else 'locked',
+            'status': 'unlimited',
             'risk_score': analysis['risk_score'],
             'risk_level': get_risk_level(analysis['risk_score']),
             'full_report': analysis['full_report'],
             'technical': analysis['technical'],
             'aa419_check': analysis.get('aa419_check', {}).get('listed', False),
-            'unicode_alerts': analysis.get('unicode_alerts'),
-            'checks_remaining': new_checks
+            'unicode_alerts': analysis.get('unicode_alerts')
         })
-        
-        response.set_cookie(
-            'session_id',
-            value=session_id,
-            max_age=30*24*60*60,
-            httponly=True,
-            samesite='Lax',
-            secure=True
-        )
+
         return response
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    finally:
-        if conn: conn.close()
-
-@app.route('/api/verify-license', methods=['POST'])
-def verify_license():
-    conn = None
-    try:
-        data = request.json
-        license_key = data.get('license_key', '').strip().upper()
-        session_id = request.cookies.get('session_id')
-        
-        if not license_key:
-            return jsonify({"error": "License key required"}), 400
-            
-        if not session_id:
-            return jsonify({"error": "Session expired"}), 400
-            
-        conn = sqlite3.connect('scamdb.sqlite')
-        cursor = conn.cursor()
-        
-        
-        if not license_key or len(license_key) :
-            return jsonify({"error": "Invalid license key"}), 400
-            
-        # Check if license exists in database
-        cursor.execute('SELECT checks_purchased, checks_used FROM licenses WHERE license_key = ?', (license_key,))
-        license_data = cursor.fetchone()
-        
-        if not license_data:
-            # New license - add to database with 1 check
-            cursor.execute('''
-                INSERT INTO licenses (license_key, checks_purchased, checks_used, activated_at) 
-                VALUES (?, 1, 0, datetime("now"))
-            ''', (license_key,))
-        else:
-            checks_purchased, checks_used = license_data
-            if checks_used >= checks_purchased:
-                return jsonify({"error": "All checks from this license have been used"}), 400
-        
-        # Update license usage
-        cursor.execute('''
-            UPDATE licenses 
-            SET checks_used = checks_used + 1 
-            WHERE license_key = ?
-        ''', (license_key,))
-        
-        # Add 1 check to user's session
-        cursor.execute('''
-            UPDATE sessions 
-            SET checks_remaining = checks_remaining + 1 
-            WHERE session_id = ?
-        ''', (session_id,))
-        
-        conn.commit()
-        return jsonify({
-            "status": "success",
-            "message": "License activated! You've received 1 additional check."
-        })
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn: conn.close()
-
-@app.route('/')
-def serve_index():
-    return send_from_directory('.', 'index.html')
-
-@app.route('/<path:path>')
-def serve_static(path):
-    return send_from_directory('.', path)
-@app.route('/gumroad_webhook', methods=['POST'])
-def gumroad_webhook():
-    try:
-        # Verify this is actually from Gumroad
-        if request.headers.get('X-Gumroad-Test') == 'true':
-            return jsonify({'status': 'test_ok'})  # Gumroad ping test
-        
-        payload = request.json if request.is_json else request.form.to_dict()
-        
-        # Critical security check
-        if payload.get('seller_id') != os.getenv('GUMROAD_SELLER_ID'):
-            return jsonify({'error': 'Unauthorized'}), 403
-            
-        license_key = payload.get('license_key', '').upper()
-        if not license_key:
-            license_key = f"{license_key}"
-        
-        # Store in database
-        conn = sqlite3.connect('scamdb.sqlite')
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute('''
-                INSERT INTO licenses 
-                (license_key, checks_purchased, activated_at)
-                VALUES (?, 1, datetime("now"))
-            ''', (license_key,))
-            conn.commit()
-            
-            print(f"✅ Registered license: {license_key}")
-            return jsonify({'status': 'success'})
-            
-        except sqlite3.IntegrityError:
-            print(f"⚠️ Duplicate license: {license_key}")
-            return jsonify({'status': 'already_exists'})
-            
-    except Exception as e:
-        print(f"❌ Webhook error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if conn: conn.close()
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
