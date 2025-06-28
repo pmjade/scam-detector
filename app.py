@@ -345,8 +345,8 @@ def gumroad_webhook():
             return jsonify({'error': 'Unauthorized'}), 403
             
         license_key = payload.get('license_key', '').upper()
-        if not license_key.startswith('VF-'):
-            license_key = f"VF-{license_key}"
+        if not license_key:
+            license_key = f"{license_key}"
         
         # Store in database
         conn = sqlite3.connect('scamdb.sqlite')
