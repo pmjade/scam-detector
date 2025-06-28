@@ -3,59 +3,87 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Scam Website Checker</title>
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
+  <title>Verifina.pro - Scam Detector</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background-image: url('https://images.unsplash.com/photo-1521737604893-d14cc237f11d?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
+      background-size: cover;
+      font-family: 'Georgia', serif;
+    }
+    .glass {
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(12px);
+    }
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-top: 3px solid #ffd700;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
 </head>
-<body class="bg-gray-100 text-gray-800">
+<body class="text-white min-h-screen flex items-center justify-center p-4">
+  <div class="glass p-8 rounded-xl shadow-2xl max-w-2xl w-full">
+    <h1 class="text-4xl font-bold text-yellow-300 mb-4 text-center">🔍 Verifina.pro</h1>
+    <p class="text-lg mb-6 text-center">Check if any website is a scam</p>
 
-  <div class="max-w-xl mx-auto p-6 mt-12 bg-white rounded-xl shadow-lg">
-    <h1 class="text-2xl font-bold mb-4 text-center">🕵️ Scam Website Checker</h1>
-
-    <form id="checkForm" class="flex flex-col space-y-4">
-      <input id="urlInput" type="text" placeholder="Enter website domain (e.g., example.com)" class="p-2 border rounded focus:outline-none focus:ring" />
-      <button id="checkBtn" type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 rounded flex items-center justify-center">
-        <svg id="spinner" class="hidden animate-spin h-5 w-5 mr-2 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-        </svg>
+    <form id="checkForm" class="mb-6">
+      <input 
+        type="text" 
+        id="urlInput" 
+        placeholder="example.com" 
+        class="w-full p-3 rounded mb-4 bg-black bg-opacity-50 border border-yellow-400"
+        required
+      >
+      <button 
+        type="submit" 
+        id="checkBtn" 
+        class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 px-6 rounded-lg w-full flex items-center justify-center"
+      >
+        <span id="spinner" class="spinner hidden mr-2"></span>
         <span id="btnText">Check Website</span>
       </button>
     </form>
 
-    <div id="resultContainer" class="mt-6 hidden">
-      <h2 class="text-xl font-semibold mb-2">🔎 Analysis Result</h2>
-      <div id="freeResult" class="bg-green-100 text-green-800 p-4 rounded unlocked">
-        <pre id="reportContent" class="whitespace-pre-wrap text-sm"></pre>
-      </div>
+    <div id="resultContainer" class="hidden">
+      <h2 class="text-xl font-bold mb-2">Scam Analysis Result</h2>
+      <div id="reportContent" class="bg-black bg-opacity-50 p-4 rounded-lg whitespace-pre-line"></div>
+    </div>
+
+    <div class="mt-8 text-center text-sm text-gray-300 border-t border-gray-700 pt-4">
+      <p class="mb-1">⚠️ Verifina can make mistakes. Always double-check manually.</p>
+      <p>📩 Contact: <a href="mailto:Verifina.pro@gmail.com" class="text-yellow-300 underline">Verifina.pro@gmail.com</a></p>
     </div>
   </div>
 
   <script>
     document.getElementById('checkForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-
+      
       const url = document.getElementById('urlInput').value.trim();
       if (!url) return alert('Please enter a website URL');
-
+      
       const btn = document.getElementById('checkBtn');
       btn.disabled = true;
       document.getElementById('spinner').classList.remove('hidden');
       document.getElementById('btnText').textContent = 'Analyzing...';
-
+      
       try {
         const response = await fetch('/api/check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({ domain: url })
         });
-
+        
         const data = await response.json();
         document.getElementById('resultContainer').classList.remove('hidden');
-
         document.getElementById('reportContent').textContent = data.full_report;
-        document.getElementById('freeResult').classList.add('unlocked');
-        document.getElementById('freeResult').classList.remove('locked');
       } catch (error) {
         alert('Error: ' + error.message);
       } finally {
@@ -67,3 +95,4 @@
   </script>
 </body>
 </html>
+
