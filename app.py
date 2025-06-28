@@ -334,33 +334,44 @@ def serve_static(path):
 @app.route('/gumroad_webhook', methods=['POST'])
 def gumroad_webhook():
     try:
-        payload = request.form.to_dict()
-        email = payload.get('email')
-        license_key = payload.get('license_key', '').strip().upper()
-
-        if not license_key:
-            return jsonify({'error': 'Missing license key'}), 400
+        # Verify this is actually from Gumroad
+        if request.headers.get('X-Gumroad-Test') == 'true':
+            return jsonify({'status': 'test_ok'})  # Gumroad ping test
+        
+        payload = request.json if request.is_json else request.form.to_dict()
+        
+        # Critical security check
+        if payload.get('seller_id') != os.getenv('GUMROAD_SELLER_ID'):
+            return jsonify({'error': 'Unauthorized'}), 403
             
+        license_key = payload.get('license_key', '').upper()
+        if not license_key.startswith('VF-'):
+            license_key = f"VF-{license_key}"
+        
+        # Store in database
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
-
-        cursor.execute('SELECT * FROM licenses WHERE license_key = ?', (license_key,))
-        if cursor.fetchone():
-            return jsonify({'error': 'License already exists'}), 400
-
-        cursor.execute('''
-            INSERT INTO licenses (license_key, checks_purchased, checks_used, activated_at)
-            VALUES (?, 1, 0, datetime("now"))
-        ''', (license_key,))
-        conn.commit()
-        conn.close()
-
-        print(f"✅ License from Gumroad: {license_key} | {email}")
-        return jsonify({'status': 'ok'})
-
+        
+        try:
+            cursor.execute('''
+                INSERT INTO licenses 
+                (license_key, checks_purchased, activated_at)
+                VALUES (?, 1, datetime("now"))
+            ''', (license_key,))
+            conn.commit()
+            
+            print(f"✅ Registered license: {license_key}")
+            return jsonify({'status': 'success'})
+            
+        except sqlite3.IntegrityError:
+            print(f"⚠️ Duplicate license: {license_key}")
+            return jsonify({'status': 'already_exists'})
+            
     except Exception as e:
-        print(f"❌ Webhook Error: {str(e)}")
+        print(f"❌ Webhook error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: conn.close()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
