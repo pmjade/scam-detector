@@ -338,9 +338,9 @@ def gumroad_webhook():
         email = payload.get('email')
         license_key = payload.get('license_key', '').strip().upper()
 
-        if not license_key or not license_key.startswith('VF-'):
-            return jsonify({'error': 'Invalid or missing license key'}), 400
-
+        if not license_key:
+            return jsonify({'error': 'Missing license key'}), 400
+            
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
 
