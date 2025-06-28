@@ -280,9 +280,9 @@ def verify_license():
         conn = sqlite3.connect('scamdb.sqlite')
         cursor = conn.cursor()
         
-        # Check if license key is valid (starts with VF- and has correct format)
-        if not (license_key.startswith("VF-") and len(license_key) > 10):
-            return jsonify({"error": "Invalid license key format"}), 400
+        
+        if not license_key or len(license_key) :
+            return jsonify({"error": "Invalid license key"}), 400
             
         # Check if license exists in database
         cursor.execute('SELECT checks_purchased, checks_used FROM licenses WHERE license_key = ?', (license_key,))
